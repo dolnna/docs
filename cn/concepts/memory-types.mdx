@@ -1,0 +1,176 @@
+---
+title: "记忆类型：文本、激活和参数"
+description: "了解每个 MemCube 中的三种记忆类型 —— 文本（可搜索事实）、激活（推理加速）和参数（模型个性化）。"
+---
+
+每个 MemCube 最多可存放三种记忆类型，每种都针对不同目的进行了优化。文本记忆以可搜索的形式存储事实、偏好和知识。激活记忆缓存模型计算状态以加速重复推理。参数记忆持有 LoRA 适配器权重，用于深度模型个性化。理解差异有助于您为应用选择正确的存储方式。
+
+<Tabs>
+  <Tab title="文本记忆 (text_mem)">
+    文本记忆是大多数应用的主要记忆类型。它以可检索的形式存储提取的事实、用户偏好、对话洞察和结构化知识。当您调用 `POST /product/search` 时，您拿到的结果来自 `text_mem`。
+
+    ### 存储的内容
+
+    每个记忆项有一个 `memory` 字段（提取的文本）和一个带有以下字段的 `metadata` 块：
+
+    - **`type`** —— `"fact"`、`"preference"`、`"event"` 或 `"procedure"`
+    - **`source`** —— `"conversation"`、`"file"`、`"web"` 或 `"retrieved"`
+    - **`confidence`** —— 0–100 的分数，表示提取的确定性
+    - **`entities`** —— 提及的关键人物、地点或概念
+    - **`tags`** —— 用于过滤的主题标签
+    - **`visibility`** —— `"private"`、`"public"` 或 `"session"`
+
+    ### 搜索结果的样子
+
+    ```json
+    {
+      "text_mem": [
+        {
+          "cube_id": "user-abc-main",
+          "memories": [
+            {
+              "id": "mem-001",
+              "memory": "User prefers dark mode and uses VS Code.",
+              "metadata": {
+                "type": "preference",
+                "confidence": 95,
+                "source": "conversation",
+                "entities": ["VS Code"],
+                "tags": ["editor", "preferences"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+    ```
+
+    ### 文本记忆后端
+
+    MemOS 支持三种文本记忆后端选项，从零依赖的开发配置到生产级的向量和图存储：
+
+    <AccordionGroup>
+      <Accordion title="general_text —— 使用 Qdrant 进行向量搜索">
+        标准的生产后端。`GeneralTextMemory` 将记忆作为向量嵌入存储在 Qdrant 中，并使用语义相似度搜索进行检索。它支持丰富的元数据过滤，可扩展到每用户数万条记忆，并适用于您配置的任何嵌入模型。
+
+        **最适合：** 对话型 Agent、个人助手、知识管理系统。
+
+        **要求：** 运行中的 Qdrant 实例和已配置的嵌入模型。
+      </Accordion>
+      <Accordion title="tree_text —— 使用 Neo4j 的图记忆">
+        `TreeTextMemory` 将记忆作为节点存储在 Neo4j 图数据库中，使用语义关系和层次结构将它们连接起来。它结合向量相似度搜索与图遍历，支持多跳推理 —— 例如，找到通过共享实体或因果链连接的记忆。
+
+        **最适合：** 知识图谱、复杂关系推理、应用中事实之间的连接与事实本身同等重要的场景。
+
+        **要求：** 运行中的 Neo4j 实例、向量数据库和嵌入模型。
+      </Accordion>
+      <Accordion title="naive_text —— 轻量级 SQLite 存储">
+        `NaiveTextMemory` 使用由 SQLite 支持的内存存储以及基于关键词的检索。它没有外部依赖，是最快的上手方式。
+
+        **最适合：** 快速原型、演示、开发环境、小规模应用。
+
+        **限制：** 无语义向量搜索；不适合大规模记忆集或生产负载。
+      </Accordion>
+    </AccordionGroup>
+
+    <Tip>
+      先用 `naive_text` 快速跑起来。当您在生产中需要语义搜索时切换到 `general_text` (Qdrant)，或者当您的应用需要在记忆之间的关系上进行推理时切换到 `tree_text` (Neo4j)。
+    </Tip>
+  </Tab>
+  <Tab title="激活记忆 (act_mem)">
+    激活记忆存储来自 HuggingFace 语言模型的预计算 KV (键值) 缓存状态。无需在每次请求中重新编码相同的背景上下文，您只需计算一次，保存 KV 缓存，并在后续调用中直接将其注入模型的注意力机制。
+
+    ### 工作原理
+
+    当您有稳定、频繁使用的内容时 —— 系统提示、领域 FAQ、用户的长档案 —— 您可以将其预编码为 KV 缓存。在推理时，模型完全跳过该内容的预填计算，降低首字延迟 (TTFT) 并提升吞吐量。
+
+    ```
+    Stable text content
+          │
+          ▼
+    Pre-compute KV cache ──► store in act_mem
+          │
+    At inference time:
+          ▼
+    Inject KV cache directly into attention ──► skip re-encoding
+    ```
+
+    ### 何时使用
+
+    激活记忆在以下情况下最有价值：
+
+    - 同样的背景上下文出现在许多请求中（例如，系统提示、产品 FAQ、用户的长档案）
+    - 您在本地运行 HuggingFace 模型并希望减少 GPU 计算
+    - 您需要在高流量的聊天机器人或助手中提高吞吐量
+
+    <Note>
+      激活记忆仅适用于 HuggingFace 模型。使用 OpenAI、Anthropic 或其他封闭 API 提供商时不适用。
+    </Note>
+
+    ### 在搜索结果中
+
+    当搜索返回激活记忆时，它出现在响应的 `act_mem` 数组中。对于大多数基于 API 的部署，此数组将为空。
+
+    ```json
+    {
+      "text_mem": [...],
+      "act_mem": [],
+      "para_mem": []
+    }
+    ```
+  </Tab>
+  <Tab title="参数记忆 (para_mem)">
+    参数记忆存储 LoRA (低秩适配) 适配器权重，将个性化知识直接编码到模型参数中。参数记忆不是在查询时从数据库检索事实，而是将该知识烘焙到模型本身 —— 提供零延迟访问，无需检索步骤。
+
+    ### 工作原理
+
+    您在用户或领域的特定知识上微调一个 LoRA 适配器，然后将适配器权重存储在 `para_mem` 中。当模型加载了这些权重时，它已经"知道"个性化内容 —— 无需检索。
+
+    ### 何时使用
+
+    参数记忆适合稳定的、不常变化的常青知识：
+
+    - 适用于每次交互的领域专长（例如，法律、医学或产品知识）
+    - 用户特有的技能或写作风格
+    - 已经验证并稳定下来的长期偏好
+
+    <Note>
+      参数记忆 (LoRA 适配器支持) 正在积极开发中。请查看 [MemOS 更新日志](https://github.com/MemTensor/MemOS) 获取可用性更新。
+    </Note>
+
+    ### 记忆类型如何协同工作
+
+    随着时间推移，MemOS 可以根据使用模式在不同记忆类型之间提升和降级记忆：
+
+    - **频繁访问** 的文本记忆可以被蒸馏为激活 KV 缓存，去除冗余计算。
+    - **稳定的高置信度** 知识可以进一步蒸馏到参数权重中，实现零延迟访问。
+    - **很少使用** 的参数或激活条目可以降级回文本存储，便于审计和重训练。
+
+    这种生命周期意味着您的 AI 系统不仅仅是存储数据 —— 它会根据数据的实际使用方式来调整其记忆组织。
+  </Tab>
+</Tabs>
+
+## 选择文本记忆后端
+
+如果您要决定为 `text_mem` 配置哪种后端，请参考此对比：
+
+| | `naive_text` | `general_text` | `tree_text` |
+|---|---|---|---|
+| **后端** | 内存 / SQLite | Qdrant (向量数据库) | Neo4j (图数据库) |
+| **搜索方法** | 关键词 | 向量语义 | 向量 + 图遍历 |
+| **语义理解** | 否 | 是 | 是 |
+| **关系推理** | 否 | 否 | 是 (多跳) |
+| **规模** | 小 (开发/演示) | 中–大 | 大 |
+| **外部依赖** | 无 | Qdrant + 嵌入器 | Neo4j + Qdrant + 嵌入器 |
+| **最适合** | 原型开发 | 多数生产场景 | 知识图谱、推理 |
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="MemCube" icon="box" href="/cn/concepts/mem-cube">
+    了解记忆类型如何在 MemCube 内组织以及如何在 API 请求中引用它们。
+  </Card>
+  <Card title="记忆后端配置" icon="settings" href="/cn/configuration/memory-backends">
+    为您的部署配置 Qdrant、Neo4j 和嵌入模型。
+  </Card>
+</CardGroup>

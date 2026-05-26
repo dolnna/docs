@@ -1,0 +1,64 @@
+---
+title: "什么是 MemOS？面向 AI Agent 的记忆操作系统"
+description: "MemOS 是一个为 LLM 和 AI Agent 提供持久化、可搜索记忆的记忆操作系统 —— 在一个 API 中统一存储、检索和管理。"
+---
+
+MemOS 是一个面向 LLM 和 AI Agent 的记忆操作系统。当大多数 AI 应用在会话之间丢失上下文时，MemOS 为您的 Agent 提供了一个可随时间写入、搜索和管理的持久化记忆层。无论您是在云端运行还是在自有基础设施上自部署，您都可以通过同一个 REST API 或 Python SDK 与它交互 —— 接口完全一致。
+
+## 为什么选择 MemOS？
+
+现代 LLM 功能强大但无状态。它们依赖于参数化记忆（模型权重），更新成本高昂且无法在运行时检查。标准的 RAG 流水线虽然能检索外部事实，但缺乏生产级 Agent 所需的生命周期管理、个性化和跨 Agent 共享能力。
+
+MemOS 将记忆视为一类受编排的资源 —— 而不是一个黑盒嵌入存储。每一条记忆都是结构化的、可版本化的、可审计的。您的 Agent 可以积累知识，通过自然语言修正过去的记忆，并使用名为 **MemCube** 的可组合容器在会话或 Agent 之间共享记忆。
+
+## 您可以用 MemOS 做什么
+
+- **添加记忆**：从对话消息中提取 —— MemOS 自动提取并存储结构化事实
+- **语义搜索记忆**：在生成响应之前检索相关上下文
+- **持续修正和优化**：通过自然语言反馈修正记忆
+- **共享记忆**：跨多个 Agent 共享，或按用户、会话、项目隔离
+- **节省 Token**：精准检索意味着您只注入真正重要的内容
+
+基准测试显示，相比 OpenAI Memory，MemOS 提供 **+43.70% 的准确率**，并在生产负载中节省 **35.24% 的记忆 Token**。
+
+## 三种记忆类型
+
+MemOS 在一个系统中统一了三种不同形式的记忆：
+
+| 类型 | 存储内容 | 典型用途 |
+| --- | --- | --- |
+| **文本记忆 (Textual)** | 事实、偏好、知识、对话历史 | 语义搜索、个性化、可解释的召回 |
+| **激活记忆 (Activation)** | 推理产生的 KV 缓存状态 | 快速多轮对话、低延迟生成 |
+| **参数记忆 (Parametric)** | LoRA 适配器权重 | 长期技能保留、领域专业化 |
+
+随着时间推移，热点文本记忆可被提升为 KV 缓存以实现快速注入，稳定的知识可被蒸馏到参数权重中 —— 形成一个随您的 Agent 进化的活记忆循环。
+
+## MemCubes
+
+**MemCube** 是为用户、会话或 Agent 持有记忆的容器。每个 MemCube 都可独立加载、保存，并通过 ID 寻址。您可以让不同的 Agent 访问共享的 MemCube，也可以完全隔离它们 —— 全部通过同一个 API 完成。
+
+## 部署选项
+
+MemOS 提供两种部署模式：
+
+- **云端（托管）**：在 [memos-dashboard.openmem.net](https://memos-dashboard.openmem.net) 注册，获取 API 密钥，立即开始调用 API —— 无需管理基础设施。
+- **自部署**：使用 Docker 或 pip 在您自有基础设施上运行 MemOS。对数据、模型和配置完全可控。
+
+两种模式下，REST API 接口完全相同。
+
+## 下一步去哪里
+
+<CardGroup cols={2}>
+  <Card title="快速开始" icon="rocket" href="/cn/quickstart">
+    在 5 分钟内完成您的第一次记忆 API 调用 —— 云端或自部署。
+  </Card>
+  <Card title="安装" icon="download" href="/cn/installation">
+    通过 Docker、pip 或源代码安装 MemOS，包含完整配置步骤。
+  </Card>
+  <Card title="核心概念" icon="brain" href="/cn/concepts/overview">
+    了解 MemCube、记忆类型、生命周期以及 MemScheduler。
+  </Card>
+  <Card title="API 参考" icon="code" href="/cn/api/add">
+    探索完整的 REST API —— 添加、搜索、聊天、反馈等。
+  </Card>
+</CardGroup>

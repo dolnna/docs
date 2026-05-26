@@ -1,0 +1,347 @@
+---
+title: '获取记忆 —— GET & POST /product/get_memory'
+description: '按 ID 获取记忆、通过可选过滤器和分页列出 MemCube 中的记忆，或检索用户某种类型的全部记忆。'
+---
+
+MemOS 提供三个端点用于读取已存储的记忆。当您有特定记忆 ID 并想获取其完整记录时，使用 GET 端点。当您想列出 MemCube 中所有记忆（可选分页或过滤）时，使用 POST 端点。当您需要用户某种特定类型记忆的完整快照时（例如填充 UI 或导出数据），使用 `get_all` 端点。
+
+---
+
+## GET /product/get_memory/{memory_id}
+
+通过唯一 ID 获取单条记忆。
+
+### 路径参数
+
+<ParamField path="memory_id" type="string" required>
+  要检索的记忆的 UUID。
+</ParamField>
+
+### 响应
+
+<ResponseField name="code" type="number">
+  成功时为 `200`。
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  状态消息。
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  记忆数据。参见下方的 [memory object](#memory-object-reference) 参考。
+</ResponseField>
+
+### 示例
+
+<CodeGroup>
+
+```bash cURL
+curl http://localhost:8000/product/get_memory/2f40be8f-736c-4a5f-aada-9489037769e0
+```
+
+```python Python
+import requests
+
+memory_id = "2f40be8f-736c-4a5f-aada-9489037769e0"
+response = requests.get(
+    f"http://localhost:8000/product/get_memory/{memory_id}"
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory retrieved successfully",
+  "data": {
+    "memory_detail_list": [
+      {
+        "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+        "memory": "[user opinion] User likes strawberries.",
+        "metadata": {
+          "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+          "type": "fact",
+          "confidence": 0.99,
+          "tags": ["preference", "strawberries"],
+          "created_at": "2025-09-18T08:23:44.625511+00:00",
+          "updated_at": "2025-09-18T08:23:44.625479+00:00",
+          "status": "activated",
+          "memory_type": "UserMemory"
+        }
+      }
+    ],
+    "preference_detail_list": null
+  }
+}
+```
+
+---
+
+## POST /product/get_memory
+
+从 MemCube 检索记忆，支持可选分页和元数据过滤。
+
+### 请求体
+
+<ParamField body="mem_cube_id" type="string" required>
+  要读取的 MemCube 的 ID。
+</ParamField>
+
+<ParamField body="user_id" type="string">
+  将结果过滤为属于此用户的记忆。
+</ParamField>
+
+<ParamField body="include_preference" type="boolean" default="true">
+  当为 `true` 时，偏好记忆将包含在 `preference_detail_list` 中。
+</ParamField>
+
+<ParamField body="include_tool_memory" type="boolean" default="true">
+  当为 `true` 时，工具使用记忆将包含在响应中。
+</ParamField>
+
+<ParamField body="include_skill_memory" type="boolean" default="true">
+  当为 `true` 时，技能记忆将包含在响应中。
+</ParamField>
+
+<ParamField body="page" type="number">
+  页码（从 1 开始）。省略时，将返回所有记录而不分页。
+</ParamField>
+
+<ParamField body="page_size" type="number">
+  每页记忆数。省略时，将返回所有记录。
+</ParamField>
+
+<ParamField body="filter" type="object">
+  结构化元数据过滤器。支持对任何元数据字段使用 `and` / `or` 条件。
+
+  <Expandable title="filter example">
+    ```json
+    {
+      "and": [
+        { "tags": "travel" },
+        { "created_at": { "gt": "2025-01-01" } }
+      ]
+    }
+    ```
+  </Expandable>
+</ParamField>
+
+### 示例
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/get_memory \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "page": 1,
+    "page_size": 20
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/get_memory",
+    json={
+        "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "page": 1,
+        "page_size": 20,
+    },
+)
+memories = response.json()["data"]["memory_detail_list"]
+print(f"Retrieved {len(memories)} memories")
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory retrieved successfully",
+  "data": {
+    "memory_detail_list": [
+      {
+        "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+        "memory": "[user opinion] User likes strawberries.",
+        "metadata": {
+          "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+          "type": "fact",
+          "confidence": 0.99,
+          "tags": ["preference", "strawberries"],
+          "created_at": "2025-09-18T08:23:44.625511+00:00",
+          "updated_at": "2025-09-18T08:23:44.625479+00:00",
+          "status": "activated",
+          "memory_type": "UserMemory"
+        }
+      }
+    ],
+    "preference_detail_list": null
+  }
+}
+```
+
+---
+
+## POST /product/get_all
+
+获取用户某种类型的所有记忆。当提供 `search_query` 时，返回相关的子图而不是所有记录。
+
+### 请求体
+
+<ParamField body="user_id" type="string" required>
+  您正在检索其记忆的用户。
+</ParamField>
+
+<ParamField body="memory_type" type="string" required>
+  要检索的记忆类型。以下之一：
+  - `"text_mem"` —— 事实和对话记忆
+  - `"act_mem"` —— 动作和工具使用记忆
+  - `"para_mem"` —— 参数 / 偏好记忆
+</ParamField>
+
+<ParamField body="mem_cube_ids" type="string[]">
+  要读取的 MemCube ID 列表。省略时，默认为由 `user_id` 标识的 cube。
+</ParamField>
+
+<ParamField body="search_query" type="string">
+  可选的查询字符串。提供时，返回与此查询语义相关的记忆子图，而不是所有记忆。
+</ParamField>
+
+<ParamField body="search_type" type="string" default="fulltext">
+  提供 `search_query` 时使用的搜索类型。`"fulltext"` 或 `"embedding"`。
+</ParamField>
+
+### 示例
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/get_all \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "memory_type": "text_mem",
+    "mem_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"]
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/get_all",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "memory_type": "text_mem",
+        "mem_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory retrieved successfully",
+  "data": [
+    {
+      "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+      "memory": "[user opinion] User likes strawberries.",
+      "metadata": {
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "type": "fact",
+        "confidence": 0.99,
+        "tags": ["preference", "strawberries"],
+        "created_at": "2025-09-18T08:23:44.625511+00:00",
+        "status": "activated",
+        "memory_type": "UserMemory"
+      }
+    },
+    {
+      "id": "7c91aa32-1e2b-4d98-b4e7-0001234abcde",
+      "memory": "User has a meeting in Shanghai on Friday at 3pm.",
+      "metadata": {
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "type": "fact",
+        "confidence": 0.97,
+        "tags": ["meeting", "schedule"],
+        "created_at": "2025-09-19T10:15:00.000000+00:00",
+        "status": "activated",
+        "memory_type": "UserMemory"
+      }
+    }
+  ]
+}
+```
+
+---
+
+## Memory 对象参考
+
+<ResponseField name="id" type="string">
+  唯一的记忆标识符（UUID）。
+</ResponseField>
+
+<ResponseField name="memory" type="string">
+  提取的记忆文本，通常以 `[user opinion]` 或 `[fact]` 等语义标签作为前缀。
+</ResponseField>
+
+<ResponseField name="metadata" type="object">
+  <Expandable title="metadata fields">
+    <ResponseField name="metadata.user_id" type="string">
+      此记忆所属的用户。
+    </ResponseField>
+    <ResponseField name="metadata.type" type="string">
+      语义类型，例如 `"fact"` 或 `"preference"`。
+    </ResponseField>
+    <ResponseField name="metadata.memory_type" type="string">
+      内部分类，例如 `"UserMemory"` 或 `"WorkingMemory"`。
+    </ResponseField>
+    <ResponseField name="metadata.confidence" type="number">
+      提取置信度分数，介于 `0` 和 `1` 之间。
+    </ResponseField>
+    <ResponseField name="metadata.tags" type="string[]">
+      附加到记忆的标签。
+    </ResponseField>
+    <ResponseField name="metadata.status" type="string">
+      激活状态：`"activated"` 或 `"deactivated"`。
+    </ResponseField>
+    <ResponseField name="metadata.key" type="string">
+      记忆的简短描述性标签。
+    </ResponseField>
+    <ResponseField name="metadata.background" type="string">
+      提取时生成的上下文语句。
+    </ResponseField>
+    <ResponseField name="metadata.created_at" type="string">
+      ISO 8601 创建时间戳。
+    </ResponseField>
+    <ResponseField name="metadata.updated_at" type="string">
+      ISO 8601 最后更新时间戳。
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## 错误响应
+
+| Code | 描述 |
+|------|-------------|
+| `404` | 找不到给定 ID 的记忆。 |
+| `422` | 验证错误 —— 缺少或无效参数。 |
+| `500` | 内部服务器错误。 |

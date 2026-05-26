@@ -1,0 +1,58 @@
+---
+title: "MemOS：面向 LLM 和 AI Agent 的记忆操作系统"
+description: "MemOS 为您的 AI Agent 提供持久化、可搜索的记忆。通过统一的 API 添加、检索和管理长期记忆 —— 包含 35% 的 Token 节省。"
+---
+
+MemOS 是一个为 LLM 和 AI Agent 提供持久化、上下文感知记忆的记忆操作系统。通过一个 REST API 或 Python SDK，您可以从对话中添加记忆，进行语义搜索，并将其反馈给您的 Agent —— 从而实现可随时间进化的个性化、有状态的 AI 交互。
+
+<CardGroup cols={2}>
+  <Card title="快速开始" icon="rocket" href="/cn/quickstart">
+    在 5 分钟内完成您的第一次记忆 API 调用 —— 云端或自部署。
+  </Card>
+  <Card title="安装" icon="download" href="/cn/installation">
+    通过 Docker、pip 或源代码安装 MemOS。
+  </Card>
+  <Card title="核心概念" icon="brain" href="/cn/concepts/overview">
+    了解 MemCube、记忆类型以及 MemScheduler。
+  </Card>
+  <Card title="API 参考" icon="code" href="/cn/api/add">
+    探索完整的 REST API —— 添加、搜索、聊天等等。
+  </Card>
+</CardGroup>
+
+## 您可以构建什么
+
+MemOS 为您的 AI Agent 提供生产级应用场景所需的记忆层：
+
+<CardGroup cols={2}>
+  <Card title="个性化 AI 助手" icon="user">
+    跨会话记住用户的偏好、习惯和上下文 —— 无需反复重复自己。
+  </Card>
+  <Card title="Agent 的长期上下文" icon="timeline">
+    在每次对话或任务中自动检索相关的历史知识。
+  </Card>
+  <Card title="多 Agent 记忆共享" icon="share-nodes">
+    使用可组合的 MemCube 在多个 Agent 之间共享和隔离记忆。
+  </Card>
+  <Card title="Token 高效的 RAG" icon="bolt">
+    通过智能检索减少 35.24% 的 Token —— 只注入相关内容。
+  </Card>
+</CardGroup>
+
+## 三步开始使用
+
+<Steps>
+  <Step title="获取访问权限">
+    在 [memos-dashboard.openmem.net](https://memos-dashboard.openmem.net) 注册以获得云端访问权限，或通过 Docker 或 pip [自部署](/cn/installation)。
+  </Step>
+  <Step title="添加您的第一条记忆">
+    发送一个带有对话消息的 `POST /product/add` 请求。MemOS 会自动提取并存储记忆。
+  </Step>
+  <Step title="搜索并使用记忆">
+    使用 `POST /product/search` 查询以检索相关记忆 —— 将它们注入您的 LLM 以获得上下文感知的响应。
+  </Step>
+</Steps>
+
+<Note>
+  MemOS 同时支持 **云端 API**（托管，无需管理基础设施）和在您自有基础设施上的 **自部署**。两种方式的 API 接口完全相同。
+</Note>

@@ -1,0 +1,180 @@
+---
+title: "通过 MCP 将 AI 助手连接到 MemOS"
+description: "运行 MemOS MCP 服务器，将记忆工具暴露给 Claude Desktop、Cursor 和其他兼容 MCP 的 AI 助手 —— 无需自定义集成代码。"
+---
+
+模型上下文协议 (MCP) 是一个标准，让 AI 助手能够调用外部工具 —— 文件系统、数据库、API —— 而无需您一侧编写自定义集成代码。MemOS 自带一个 MCP 服务器，通过 stdio 或 HTTP 暴露记忆工具。一旦将 Claude Desktop 或 Cursor 等 MCP 客户端连接到 MemOS，助手就可以在任何对话中添加、搜索和检索记忆。
+
+## 可用的 MCP 工具
+
+MemOS MCP 服务器向连接的客户端暴露以下工具：
+
+| 工具 | 描述 |
+| --- | --- |
+| `add_memory` | 将文本、文档或对话消息作为记忆存储到指定 cube 中。 |
+| `search_memories` | 根据查询字符串在一个或多个 cube 中进行语义搜索。 |
+| `get_memory` | 通过 ID 检索特定记忆。 |
+| `delete_memory` | 从 cube 中移除特定记忆。 |
+| `delete_all_memories` | 清除 cube 中的所有记忆。 |
+| `chat` | 在带记忆增强的完整上下文下向 MemOS 提问。 |
+| `create_user` | 在 MOS 系统中创建新用户。 |
+| `create_cube` | 为用户创建新的 MemCube。 |
+| `register_cube` | 注册一个磁盘上已有的 cube。 |
+| `share_cube` | 授予另一个用户对 cube 的访问权限。 |
+
+## 前置条件
+
+- 已安装 MemOS（参见 [安装](/cn/installation)）
+- 已配置环境变量（见下文）
+- 一个兼容 MCP 的客户端：Claude Desktop、Cursor 或其他支持 MCP 的工具
+
+## 配置环境变量
+
+在启动服务器之前，请在您的 MemOS 项目根目录创建一个带以下值的 `.env` 文件：
+
+```bash
+# LLM provider
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_API_BASE=https://api.openai.com/v1
+
+# Memory backend
+MOS_TEXT_MEM_TYPE=tree_text
+
+# Neo4j (required for tree_text memory type)
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_neo4j_password
+```
+
+<Note>
+  如果您使用的是 `general_text` 而不是 `tree_text` 记忆类型，则不需要 Neo4j。设置 `MOS_TEXT_MEM_TYPE=general_text` 并改为配置 Qdrant 向量数据库。
+</Note>
+
+## 启动 MCP 服务器
+
+MemOS 支持三种传输方式。选择与您客户端匹配的方式。
+
+<Steps>
+  <Step title="进入您的 MemOS 目录">
+
+    ```bash
+    cd /path/to/MemOS
+    ```
+
+  </Step>
+  <Step title="使用首选传输方式启动服务器">
+
+    <Tabs>
+      <Tab title="stdio（桌面客户端推荐）">
+
+        ```bash
+        python src/memos/api/mcp_serve.py
+        ```
+
+        stdio 传输是默认方式，适用于 Claude Desktop、Cursor 和大多数本地 MCP 客户端。进程通过标准输入/输出通信 —— 客户端管理进程生命周期。
+
+      </Tab>
+      <Tab title="HTTP">
+
+        ```bash
+        python src/memos/api/mcp_serve.py --transport http --host localhost --port 8000
+        ```
+
+        HTTP 传输适用于 Web 应用和远程客户端。服务器在指定的 host 和 port 上监听。
+
+      </Tab>
+      <Tab title="SSE（已弃用）">
+
+        ```bash
+        python src/memos/api/mcp_serve.py --transport sse --host localhost --port 8000
+        ```
+
+        仍支持 Server-Sent Events 传输，但已弃用。新集成请优先使用 `http`。
+
+      </Tab>
+    </Tabs>
+
+  </Step>
+</Steps>
+
+## 连接 Claude Desktop
+
+将以下配置添加到您的 Claude Desktop MCP 配置文件中。在 macOS 上，文件位于 `~/Library/Application Support/Claude/claude_desktop_config.json`；在 Windows 上，它是 `%APPDATA%\Claude\claude_desktop_config.json`。
+
+```json
+{
+  "mcpServers": {
+    "memos": {
+      "command": "/path/to/your/conda/envs/memos/bin/python",
+      "args": [
+        "-m", "memos.api.mcp_serve",
+        "--transport", "stdio"
+      ],
+      "env": {
+        "OPENAI_API_KEY": "sk-your-openai-key-here",
+        "OPENAI_API_BASE": "https://api.openai.com/v1",
+        "MOS_TEXT_MEM_TYPE": "tree_text",
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "your-neo4j-password"
+      }
+    }
+  }
+}
+```
+
+将 `/path/to/your/conda/envs/memos/bin/python` 替换为您 MemOS 环境中 Python 解释器的路径。如果您使用 pip 将 MemOS 安装到虚拟环境中，请改用该环境的解释器路径。
+
+保存配置后，重启 Claude Desktop。您应该会在工具面板中看到 MemOS。
+
+## 连接 Cursor
+
+Cursor 使用相同的 MCP 配置格式。打开 Cursor 设置，导航到 **MCP Servers**，并添加上面为 Claude Desktop 显示的相同 JSON 块。
+
+## 连接任意 MCP 客户端
+
+对于其他兼容 MCP 的客户端，使用此模板。将 `command` 指向您的 Python 解释器，将 `args` 指向 `mcp_serve` 模块：
+
+```json
+{
+  "mcpServers": {
+    "memos-fastmcp": {
+      "command": "python",
+      "args": [
+        "-m", "memos.api.mcp_serve",
+        "--transport", "stdio"
+      ],
+      "env": {
+        "OPENAI_API_KEY": "sk-your-key",
+        "OPENAI_API_BASE": "https://api.openai.com/v1",
+        "MOS_TEXT_MEM_TYPE": "tree_text",
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "your-password"
+      }
+    }
+  }
+}
+```
+
+<Tip>
+  如果您通过 `pip install memos` 全局安装 MemOS，您可以省略 `cwd` 字段 —— Python 会从其安装位置找到 `memos` 包。如果您克隆了仓库并从源代码运行，请添加 `"cwd": "/path/to/MemOS/src"` 以确保模块在 path 上。
+</Tip>
+
+## 验证连接
+
+一旦您的客户端配置完成，直接在对话中要求助手使用 MemOS 记忆：
+
+> "Add a memory that my team's weekly sync is every Tuesday at 2pm."
+
+助手将调用 `add_memory` 工具并确认记忆已存储。然后您可以验证检索：
+
+> "What do I have scheduled on Tuesdays?"
+
+助手用该查询调用 `search_memories` 并返回基于您刚添加的记忆的结果。
+
+## 下一步
+
+- [添加和搜索记忆](/cn/guides/add-search-memory) —— 了解底层的 add 和 search API
+- [管理多个记忆空间](/cn/guides/multi-cube) —— 为不同的项目或 Agent 使用独立的 cube
+- [使用带记忆增强的响应进行对话](/cn/guides/chat-with-memory) —— 直接使用 REST 聊天端点进行编程访问

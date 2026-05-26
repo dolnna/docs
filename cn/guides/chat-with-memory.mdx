@@ -1,0 +1,173 @@
+---
+title: "使用带记忆增强的响应进行对话"
+description: "使用 MemOS 聊天端点自动检索相关记忆并将其注入您的 LLM 上下文，生成个性化、有状态的响应。"
+---
+
+`/product/chat/complete` 和 `/product/chat/stream` 端点将记忆检索和 LLM 生成合并为一次调用。无需手动搜索记忆和构建提示，您只需发送查询，MemOS 会处理所有事情：它从您指定的 cube 中获取最相关的记忆，构建增强的提示，调用配置的 LLM，并返回响应。新的对话内容也会自动存回记忆。
+
+## 前置条件
+
+- 一个运行中的 MemOS 实例，并在环境中设置了 `ENABLE_CHAT_API=true`
+- 至少一个包含已有记忆的 MemCube（参见 [添加和搜索记忆](/cn/guides/add-search-memory)）
+- 一个 `user_id` 以及一个或多个 `readable_cube_ids` 和 `writable_cube_ids`
+
+<Warning>
+  聊天端点在自部署部署中默认禁用。在启动服务器之前在您的 `.env` 文件中设置 `ENABLE_CHAT_API=true`，否则这些端点将返回 `503 Service Unavailable`。
+</Warning>
+
+## 选择响应模式
+
+MemOS 提供两种聊天端点变体：
+
+| 端点 | 响应类型 | 何时使用 |
+| --- | --- | --- |
+| `POST /product/chat/complete` | JSON —— 一次性返回完整响应 | 批处理、测试、简单集成 |
+| `POST /product/chat/stream` | Server-Sent Events (SSE) —— 在生成时流式传输 token | 实时聊天 UI、低延迟交互 |
+
+两个端点接受相同的核心字段。
+
+## 非流式聊天
+
+当您想要一个包含完整答案的单个 JSON 响应时，使用 `/product/chat/complete`。
+
+<Steps>
+  <Step title="构建请求">
+
+    | 字段 | 类型 | 描述 |
+    | --- | --- | --- |
+    | `user_id` | string | 发送消息的用户。 |
+    | `query` | string | 用户当前的消息或问题。 |
+    | `readable_cube_ids` | string[] | 用于检索上下文记忆的 MemCube。 |
+    | `writable_cube_ids` | string[] | 在对话轮次结束后用于写入新记忆的 MemCube。 |
+    | `history` | object[] | 可选的先前对话轮次，将包含在提示窗口中。 |
+    | `top_k` | integer | 要检索和注入的记忆数。默认为 `10`。 |
+
+  </Step>
+  <Step title="发送请求">
+
+    <CodeGroup>
+
+    ```bash curl
+    curl -X POST https://your-memos-host/product/chat/complete \
+      -H "Content-Type: application/json" \
+      -d '{
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "query": "What should I have for dinner tonight?",
+        "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "top_k": 10
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    response = requests.post(
+        "https://your-memos-host/product/chat/complete",
+        json={
+            "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "query": "What should I have for dinner tonight?",
+            "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "top_k": 10,
+        }
+    )
+
+    data = response.json()
+    print(data["data"]["response"])
+    ```
+
+    </CodeGroup>
+
+  </Step>
+  <Step title="读取响应">
+
+    ```json
+    {
+      "code": 200,
+      "message": "Chat completed successfully",
+      "data": {
+        "response": "Based on what I know about you, you prefer omakase-style dining and avoid shellfish. For a home dinner tonight, you might enjoy a simple chirashi bowl with salmon, tuna, and yellowtail — no shellfish needed. If you are going out, Ichizushi in Shibuya would fit your preferences well."
+      }
+    }
+    ```
+
+    响应基于 MemOS 检索到的记忆 —— 在此示例中，是用户在之前会话中存储的用餐偏好。
+
+  </Step>
+</Steps>
+
+## 流式聊天
+
+使用 `/product/chat/stream` 以 Server-Sent Events 流的方式接收响应。每个 SSE 事件携带一个 token 片段，使您的 UI 能够在答案生成时立即显示。
+
+<Steps>
+  <Step title="发送流式请求">
+
+    <CodeGroup>
+
+    ```bash curl
+    curl -X POST https://your-memos-host/product/chat/stream \
+      -H "Content-Type: application/json" \
+      -H "Accept: text/event-stream" \
+      -d '{
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "query": "Remind me of the Tokyo restaurant recommendations.",
+        "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "writable_cube_ids": ["cube-a1b2c3d4-personal"]
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    with requests.post(
+        "https://your-memos-host/product/chat/stream",
+        json={
+            "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "query": "Remind me of the Tokyo restaurant recommendations.",
+            "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+        },
+        stream=True,
+    ) as resp:
+        for line in resp.iter_lines():
+            if line:
+                print(line.decode("utf-8"))
+    ```
+
+    </CodeGroup>
+
+  </Step>
+  <Step title="处理 SSE 事件">
+    每个事件以 `data:` 行的形式到达，后跟带有 `type` 和 `data` 字段的 JSON 负载：
+
+    ```
+    data: {"type": "text", "data": "For"}
+    data: {"type": "text", "data": " your"}
+    data: {"type": "text", "data": " Tokyo"}
+    data: {"type": "text", "data": " trip"}
+    ```
+
+    拼接所有 `"text"` 事件的 `data` 值以组装完整响应。当 LLM 完成生成时，流会自然关闭。
+  </Step>
+</Steps>
+
+## 记忆增强的工作原理
+
+当您调用任一聊天端点时，MemOS 自动运行以下流水线：
+
+1. **检索 (Retrieve)** —— MemOS 在 `readable_cube_ids` 中搜索与您的 `query` 相关的记忆，使用与 `POST /product/search` 相同的语义搜索。
+2. **增强 (Augment)** —— 检索到的记忆与您在 `history` 中提供的对话历史一起被注入到系统提示中。
+3. **生成 (Generate)** —— 您 MemOS 实例上配置的 LLM 使用增强的提示生成响应。
+4. **记忆化 (Memorize)** —— 新的对话轮次（查询 + 响应）被提取并写回 `writable_cube_ids`，以便未来的调用也能从此交互中受益。
+
+<Note>
+  如果您不希望持久化当前轮次，可以传递 `add_message_on_answer: false` 来禁用步骤 4 —— 这对一次性查询或临时会话很有用。
+</Note>
+
+## 下一步
+
+- [使用反馈纠正记忆](/cn/guides/feedback-correction) —— 修复 LLM 正在使用的错误事实
+- [跨多个 cube 搜索](/cn/guides/multi-cube) —— 在一次聊天调用中结合个人和共享知识
+- [通过 MCP 连接 AI 助手](/cn/guides/mcp-integration) —— 让 Claude 或 Cursor 将 MemOS 记忆作为工具使用

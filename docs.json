@@ -18,81 +18,169 @@
     }
   },
   "navigation": {
-    "tabs": [
+    "languages": [
       {
-        "tab": "Documentation",
-        "groups": [
+        "language": "en",
+        "tabs": [
           {
-            "group": "Get Started",
-            "pages": [
-              "introduction",
-              "quickstart",
-              "installation"
+            "tab": "Documentation",
+            "groups": [
+              {
+                "group": "Get Started",
+                "pages": [
+                  "introduction",
+                  "quickstart",
+                  "installation"
+                ]
+              },
+              {
+                "group": "Core Concepts",
+                "pages": [
+                  "concepts/overview",
+                  "concepts/mem-cube",
+                  "concepts/memory-types",
+                  "concepts/mem-scheduler"
+                ]
+              },
+              {
+                "group": "Guides",
+                "pages": [
+                  "guides/add-search-memory",
+                  "guides/chat-with-memory",
+                  "guides/feedback-correction",
+                  "guides/multi-cube",
+                  "guides/mcp-integration"
+                ]
+              },
+              {
+                "group": "Integrations",
+                "pages": [
+                  "integrations/openclaw-plugin",
+                  "integrations/hermes-plugin",
+                  "integrations/llm-providers"
+                ]
+              },
+              {
+                "group": "Configuration",
+                "pages": [
+                  "configuration/environment-variables",
+                  "configuration/memory-backends",
+                  "configuration/deployment"
+                ]
+              }
             ]
           },
           {
-            "group": "Core Concepts",
-            "pages": [
-              "concepts/overview",
-              "concepts/mem-cube",
-              "concepts/memory-types",
-              "concepts/mem-scheduler"
-            ]
-          },
-          {
-            "group": "Guides",
-            "pages": [
-              "guides/add-search-memory",
-              "guides/chat-with-memory",
-              "guides/feedback-correction",
-              "guides/multi-cube",
-              "guides/mcp-integration"
-            ]
-          },
-          {
-            "group": "Integrations",
-            "pages": [
-              "integrations/openclaw-plugin",
-              "integrations/hermes-plugin",
-              "integrations/llm-providers"
-            ]
-          },
-          {
-            "group": "Configuration",
-            "pages": [
-              "configuration/environment-variables",
-              "configuration/memory-backends",
-              "configuration/deployment"
+            "tab": "API Reference",
+            "groups": [
+              {
+                "group": "Memory API",
+                "pages": [
+                  "api/add",
+                  "api/search",
+                  "api/get-memory",
+                  "api/delete-memory",
+                  "api/feedback",
+                  "api/suggestions"
+                ]
+              },
+              {
+                "group": "Chat API",
+                "pages": [
+                  "api/chat-complete",
+                  "api/chat-stream"
+                ]
+              },
+              {
+                "group": "Scheduler API",
+                "pages": [
+                  "api/scheduler-status",
+                  "api/scheduler-wait"
+                ]
+              }
             ]
           }
         ]
       },
       {
-        "tab": "API Reference",
-        "groups": [
+        "language": "cn",
+        "tabs": [
           {
-            "group": "Memory API",
-            "pages": [
-              "api/add",
-              "api/search",
-              "api/get-memory",
-              "api/delete-memory",
-              "api/feedback",
-              "api/suggestions"
+            "tab": "文档",
+            "groups": [
+              {
+                "group": "开始使用",
+                "pages": [
+                  "cn/introduction",
+                  "cn/quickstart",
+                  "cn/installation"
+                ]
+              },
+              {
+                "group": "核心概念",
+                "pages": [
+                  "cn/concepts/overview",
+                  "cn/concepts/mem-cube",
+                  "cn/concepts/memory-types",
+                  "cn/concepts/mem-scheduler"
+                ]
+              },
+              {
+                "group": "指南",
+                "pages": [
+                  "cn/guides/add-search-memory",
+                  "cn/guides/chat-with-memory",
+                  "cn/guides/feedback-correction",
+                  "cn/guides/multi-cube",
+                  "cn/guides/mcp-integration"
+                ]
+              },
+              {
+                "group": "集成",
+                "pages": [
+                  "cn/integrations/openclaw-plugin",
+                  "cn/integrations/hermes-plugin",
+                  "cn/integrations/llm-providers"
+                ]
+              },
+              {
+                "group": "配置",
+                "pages": [
+                  "cn/configuration/environment-variables",
+                  "cn/configuration/memory-backends",
+                  "cn/configuration/deployment"
+                ]
+              }
             ]
           },
           {
-            "group": "Chat API",
-            "pages": [
-              "api/chat-complete",
-              "api/chat-stream"
-            ]
-          },
-          {
-            "group": "Scheduler API",
-            "pages": [
-              "api/scheduler-status",
-              "api/scheduler-wait"
+            "tab": "API 参考",
+            "groups": [
+              {
+                "group": "记忆 API",
+                "pages": [
+                  "cn/api/add",
+                  "cn/api/search",
+                  "cn/api/get-memory",
+                  "cn/api/delete-memory",
+                  "cn/api/feedback",
+                  "cn/api/suggestions"
+                ]
+              },
+              {
+                "group": "聊天 API",
+                "pages": [
+                  "cn/api/chat-complete",
+                  "cn/api/chat-stream"
+                ]
+              },
+              {
+                "group": "调度器 API",
+                "pages": [
+                  "cn/api/scheduler-status",
+                  "cn/api/scheduler-wait"
+                ]
+              }
             ]
           }
         ]

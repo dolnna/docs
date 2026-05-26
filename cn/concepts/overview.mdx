@@ -1,0 +1,109 @@
+---
+title: "MemOS 记忆的工作原理：核心概念"
+description: "了解 MemOS 如何将记忆组织到 MemCube 中、异步处理输入并检索上下文，以驱动 AI Agent 和 LLM 应用。"
+---
+
+MemOS 为您的 LLM 应用提供了一个结构化的记忆层 —— 它不仅是一个数据库，更是一个面向记忆的操作系统。当您将对话发送给 MemOS 时，它会自动提取事实和偏好，将它们存储在称为 MemCube 的有组织容器中，并在您需要时检索最相关的记忆。本页介绍这些组件如何协同工作，以及一个典型请求如何在系统中流转。
+
+## 系统组件
+
+MemOS 由五个协作的组件构成，每个组件都有明确的职责：
+
+<CardGroup cols={2}>
+  <Card title="MOS（记忆操作系统）" icon="server">
+    编排层。MOS 协调所有其他组件，管理多用户记忆工作流，并暴露您与之交互的统一 API。
+  </Card>
+  <Card title="MemCube" icon="box">
+    您的记忆容器。每个用户或项目获得一个 MemCube，将三种记忆类型 —— 文本、激活和参数 —— 整合在一个便携单元中。
+  </Card>
+  <Card title="MemReader" icon="file-text">
+    输入解析器。MemReader 处理原始输入 —— 对话、文档、图片、URL —— 并将它们转换为可供存储的结构化记忆项。
+  </Card>
+  <Card title="MemScheduler" icon="clock">
+    异步处理器。MemScheduler 在后台运行记忆操作，使您的应用在高负载下保持响应。它返回一个您可以轮询状态的 `task_id`。
+  </Card>
+  <Card title="MemFeedback" icon="message-square">
+    校正引擎。当用户说"那是错的"或纠正 AI 时，MemFeedback 定位并更新相关记忆 —— 同时保留版本历史以便审计。
+  </Card>
+</CardGroup>
+
+## 一个请求如何在 MemOS 中流转
+
+每个 `add` 或 `search` 调用都遵循相同的路径。理解这个流程有助于您推理延迟、异步行为以及数据的去向。
+
+<Steps>
+  <Step title="您向 add 端点发送消息">
+    您通过 `POST /product/add` 发送一个 `user_id`、一个或多个 `writable_cube_ids`，以及一个消息列表。每条消息包含一个 `role`（`user` 或 `assistant`）和 `content`。
+  </Step>
+  <Step title="MemReader 解析输入">
+    MemReader 分析消息，使用 LLM 提取有意义的事实、偏好和事件，并将它们转换为带有类型、置信度和来源等元数据的结构化记忆对象。
+  </Step>
+  <Step title="MemCube 存储记忆">
+    提取出的记忆项被写入目标 MemCube 内的文本记忆存储。根据您的配置，这可以使用向量搜索 (Qdrant)、图存储 (Neo4j) 或轻量级的内存存储 (SQLite)。
+  </Step>
+  <Step title="您搜索相关记忆">
+    当您通过 `POST /product/search` 发送查询时，MemOS 会在您指定的 `readable_cube_ids` 中运行语义相似度搜索，并返回最匹配的记忆。
+  </Step>
+  <Step title="您将记忆注入 LLM 上下文">
+    您取出返回的 `text_mem` 数组并将其纳入 LLM 的系统提示或上下文窗口。您的模型现在拥有相关的个性化记忆 —— 不会因为无关历史浪费额外 Token。
+  </Step>
+</Steps>
+
+## 同步与异步模式
+
+每个 `add` 请求都包含一个 `async_mode` 字段，用于控制 MemOS 在响应之前是否等待操作完成。
+
+| 模式 | 行为 | 返回 | 最佳场景 |
+|------|----------|---------|---------|
+| `"sync"` | 阻塞直到记忆提取和存储完成 | 记忆已存储的确认 | 开发、测试、低流量场景 |
+| `"async"` | 将工作提交给 MemScheduler 并立即返回 | 一个可轮询的 `task_id` | 生产环境、高流量、响应式 API |
+
+在异步模式下，记忆操作通过 MemScheduler 在后台运行。您可以通过调用 `GET /product/scheduler/status` 并提供 `user_id` 和 `task_id` 来检查其状态。
+
+<Info>
+  搜索 (`POST /product/search`) 始终是同步的 —— 它会阻塞并直接返回结果。只有 `add` 和类似的写操作支持异步模式。
+</Info>
+
+## 请求流程图
+
+```
+Your application
+      │
+      ▼
+POST /product/add
+      │
+      ▼
+  MemReader ──► extracts structured memories
+      │
+      ▼
+  MemCube ──────► stores in text_mem (Qdrant / Neo4j / SQLite)
+      │
+      ▼
+  [async_mode: "async"] ──► MemScheduler queue ──► returns task_id
+  [async_mode: "sync"]  ──► waits for completion ──► returns confirmation
+      │
+POST /product/search
+      │
+      ▼
+  MemCube search ──► vector + graph retrieval
+      │
+      ▼
+  Returns { text_mem: [...] }
+      │
+      ▼
+  Inject into LLM context
+```
+
+## 探索核心概念
+
+<CardGroup cols={3}>
+  <Card title="MemCube" icon="box" href="/cn/concepts/mem-cube">
+    记忆容器的工作原理、它们暴露的字段，以及如何使用可写和可读的 cube ID。
+  </Card>
+  <Card title="记忆类型" icon="layers" href="/cn/concepts/memory-types">
+    每个 MemCube 内的三种记忆类型 —— 文本、激活和参数 —— 以及何时使用各种类型。
+  </Card>
+  <Card title="MemScheduler" icon="clock" href="/cn/concepts/mem-scheduler">
+    异步记忆处理的工作方式、何时使用，以及如何追踪任务状态。
+  </Card>
+</CardGroup>

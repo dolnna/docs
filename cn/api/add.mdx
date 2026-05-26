@@ -1,0 +1,242 @@
+---
+title: '添加记忆 —— POST /product/add'
+description: '从对话消息中提取并存储记忆到一个或多个 MemCube。支持同步和异步处理模式。'
+---
+
+Add 端点处理对话消息并从中提取结构化记忆，将结果写入您指定的 MemCube。MemOS 使用 LLM 分析消息，将新记忆与现有记忆去重，并持久化提取的事实、偏好和行为信号。您可以同步运行操作以等待完成，或异步运行以接收任务 ID 并轮询结果。
+
+## 端点
+
+```
+POST /product/add
+```
+
+## 请求体
+
+<ParamField body="user_id" type="string" required>
+  您正在更新其记忆的用户的唯一标识符。
+</ParamField>
+
+<ParamField body="writable_cube_ids" type="string[]" required>
+  此请求允许写入的 MemCube ID 列表。您必须对列出的每个 cube 拥有写入权限。
+</ParamField>
+
+<ParamField body="messages" type="object[]" required>
+  从中提取记忆的对话消息。每条消息必须有 `role`（`"user"` 或 `"assistant"`）和 `content` 字符串。
+
+  <Expandable title="message object">
+    <ParamField body="messages[].role" type="string" required>
+      说话者的角色。`"user"`、`"assistant"` 或 `"system"` 之一。
+    </ParamField>
+    <ParamField body="messages[].content" type="string" required>
+      消息的文本内容。
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="async_mode" type="string" default="async">
+  处理模式。使用 `"sync"` 阻塞直到记忆写入并在响应中接收确认。使用 `"async"` 立即将操作入队并返回用于轮询的 `task_id`。默认：`"async"`。
+</ParamField>
+
+<ParamField body="session_id" type="string">
+  可选的会话标识符。提供时，MemOS 将其用作软信号，将记忆与当前对话上下文关联。
+</ParamField>
+
+<ParamField body="custom_tags" type="string[]">
+  附加到此请求创建的所有记忆的自定义标签，例如 `["travel", "preferences"]`。标签可在后续搜索请求中用作过滤器。
+</ParamField>
+
+<ParamField body="info" type="object">
+  附加到此请求创建的每条记忆的额外元数据。所有键都可作为搜索过滤器使用。
+
+  <Expandable title="info object">
+    <ParamField body="info.agent_id" type="string">
+      提交此请求的 Agent 标识符。
+    </ParamField>
+    <ParamField body="info.source_type" type="string">
+      内容的来源类型，例如 `"web"` 或 `"chat"`。
+    </ParamField>
+    <ParamField body="info.source_url" type="string">
+      源文档或页面的 URL。
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="is_feedback" type="boolean" default="false">
+  当为 `true` 时，将请求通过反馈处理器路由，而不是标准的 add 流水线。对于明确的更正流程，请使用专用的 [Feedback 端点](/cn/api/feedback)。
+</ParamField>
+
+## 响应
+
+<ResponseField name="code" type="number" required>
+  HTTP 风格的状态码。成功时为 `200`。
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  人类可读的状态消息，例如 `"Memory created successfully"`。
+</ResponseField>
+
+<ResponseField name="data" type="object | null">
+  当 `async_mode` 为 `"async"` 时存在。当 `async_mode` 为 `"sync"` 时为 `null`。
+
+  <Expandable title="data object (async_mode: async)">
+    <ResponseField name="data.success" type="boolean">
+      任务是否成功入队。
+    </ResponseField>
+    <ResponseField name="data.task_id" type="string">
+      后台任务的唯一标识符。轮询 `GET /product/scheduler/status?user_id=<user_id>&task_id=<task_id>` 以检查完成状态。
+    </ResponseField>
+    <ResponseField name="data.status" type="string">
+      初始任务状态。入队后通常为 `"waiting"`。
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## 示例
+
+### 同步添加
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/add \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "messages": [
+      {
+        "role": "user",
+        "content": "I like eating strawberries"
+      }
+    ],
+    "async_mode": "sync"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/add",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "messages": [
+            {
+                "role": "user",
+                "content": "I like eating strawberries"
+            }
+        ],
+        "async_mode": "sync",
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory created successfully",
+  "data": null
+}
+```
+
+### 异步添加
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/add \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "messages": [
+      {
+        "role": "user",
+        "content": "My meeting in Shanghai is on Friday at 3pm"
+      },
+      {
+        "role": "assistant",
+        "content": "Got it, I have noted your Shanghai meeting for Friday at 3pm."
+      }
+    ],
+    "async_mode": "async"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/add",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "messages": [
+            {
+                "role": "user",
+                "content": "My meeting in Shanghai is on Friday at 3pm",
+            },
+            {
+                "role": "assistant",
+                "content": "Got it, I have noted your Shanghai meeting for Friday at 3pm.",
+            },
+        ],
+        "async_mode": "async",
+    },
+)
+data = response.json()
+task_id = data["data"]["task_id"]
+print(f"Task enqueued: {task_id}")
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory created successfully",
+  "data": {
+    "success": true,
+    "task_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+    "status": "waiting"
+  }
+}
+```
+
+收到 `task_id` 后，您可以轮询以等待完成：
+
+```bash cURL
+curl "http://localhost:8000/product/scheduler/status?user_id=8736b16e-1d20-4163-980b-a5063c3facdc&task_id=a1b2c3d4-5678-90ab-cdef-1234567890ab"
+```
+
+## 错误响应
+
+| Code | 描述 |
+|------|-------------|
+| `400` | 请求体格式错误，例如缺少必需字段。 |
+| `422` | 验证错误 —— 一个或多个字段未通过类型或约束检查。响应体在 `detail` 数组中包含每个字段的错误消息。 |
+| `500` | 记忆提取或持久化期间发生内部服务器错误。 |
+
+```json 422
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["body", "writable_cube_ids"],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```

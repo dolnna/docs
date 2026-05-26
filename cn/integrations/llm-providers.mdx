@@ -1,0 +1,188 @@
+---
+title: "将 MemOS 连接到您的 LLM 提供商"
+description: "配置 MemOS 使用任何兼容 OpenAI 的 LLM 和嵌入提供商，包括 OpenAI、Azure、Qwen、DeepSeek、Ollama 等。"
+---
+
+MemOS 将其记忆处理逻辑与任何特定的 LLM 提供商解耦。只要您的提供商暴露兼容 OpenAI 的 Chat Completions API，您就可以通过几个环境变量将 MemOS 指向它。同样的模式适用于您的嵌入提供商，该提供商驱动跨已存储记忆的语义搜索。
+
+您需要配置两个模型：一个 **聊天模型**（用于记忆提取、摘要和可选的 Chat API）和一个 **嵌入器**（用于生成语义检索所需的向量）。
+
+---
+
+## 聊天模型配置
+
+在您的 `.env` 文件或 shell 环境中设置这些变量：
+
+| 变量 | 用途 |
+|---|---|
+| `OPENAI_API_KEY` | 您提供商的 API 密钥 |
+| `OPENAI_API_BASE` | Chat Completions 端点的基础 URL |
+| `MOS_CHAT_MODEL` | 用于记忆提取、摘要和聊天的默认模型名称 |
+| `CHAT_MODEL_LIST` | Chat API 的模型配置 JSON 数组 |
+
+<Tabs>
+  <Tab title="OpenAI">
+    ```env
+    OPENAI_API_KEY=sk-...
+    OPENAI_API_BASE=https://api.openai.com/v1
+    MOS_CHAT_MODEL=gpt-4o-mini
+
+    CHAT_MODEL_LIST=[{"backend": "openai", "api_key": "sk-...", "model_name_or_path": "gpt-4o-mini", "support_models": ["gpt-4o-mini"]}]
+    ```
+  </Tab>
+  <Tab title="Azure OpenAI">
+    ```env
+    OPENAI_API_KEY=your-azure-key
+    OPENAI_API_BASE=https://your-resource.openai.azure.com/openai/deployments/your-deployment/
+    MOS_CHAT_MODEL=your-deployment-name
+
+    CHAT_MODEL_LIST=[{"backend": "azure", "api_key": "your-azure-key", "api_base": "https://your-resource.openai.azure.com/", "model_name_or_path": "your-deployment-name", "support_models": ["your-deployment-name"]}]
+    ```
+  </Tab>
+  <Tab title="Qwen (DashScope)">
+    ```env
+    OPENAI_API_KEY=your-dashscope-api-key
+    OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+    MOS_CHAT_MODEL=qwen3-max
+
+    CHAT_MODEL_LIST=[{"backend": "qwen", "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1", "api_key": "your-dashscope-api-key", "model_name_or_path": "qwen3-max", "extra_body": {"enable_thinking": true}, "support_models": ["qwen3-max"]}]
+    ```
+
+    <Tip>
+      您可以从 [阿里云百炼控制台](https://bailian.console.aliyun.com/) 获取 DashScope API 密钥和基础 URL。
+    </Tip>
+  </Tab>
+  <Tab title="DeepSeek">
+    ```env
+    OPENAI_API_KEY=your-deepseek-api-key
+    OPENAI_API_BASE=https://api.deepseek.com/v1
+    MOS_CHAT_MODEL=deepseek-chat
+
+    CHAT_MODEL_LIST=[{"backend": "deepseek", "api_key": "your-deepseek-api-key", "api_base": "https://api.deepseek.com/v1", "model_name_or_path": "deepseek-chat", "support_models": ["deepseek-chat"]}]
+    ```
+
+    使用 `deepseek-reasoner` 替代 `deepseek-chat` 以使用推理模型。
+  </Tab>
+  <Tab title="Ollama">
+    ```env
+    OPENAI_API_KEY=ollama
+    OPENAI_API_BASE=http://localhost:11434/v1
+    MOS_CHAT_MODEL=qwen3:0.6b
+
+    CHAT_MODEL_LIST=[{"backend": "ollama", "model_name_or_path": "qwen3:0.6b", "support_models": ["qwen3:0.6b"]}]
+    ```
+
+    <Note>
+      在启动 MemOS 之前，Ollama 必须在本地运行。使用 `curl -fsSL https://ollama.com/install.sh | sh` 安装它，然后使用 `ollama pull qwen3:0.6b` 拉取您的模型。
+    </Note>
+  </Tab>
+  <Tab title="vLLM">
+    ```env
+    OPENAI_API_KEY=vllm
+    OPENAI_API_BASE=http://localhost:8001/v1
+    MOS_CHAT_MODEL=Qwen/Qwen2.5-7B-Instruct
+
+    CHAT_MODEL_LIST=[{"backend": "vllm", "api_base": "http://localhost:8001/v1", "model_name_or_path": "Qwen/Qwen2.5-7B-Instruct", "support_models": ["Qwen/Qwen2.5-7B-Instruct"]}]
+    ```
+  </Tab>
+  <Tab title="HuggingFace（本地）">
+    ```env
+    MOS_CHAT_MODEL=Qwen/Qwen3-1.7B
+
+    CHAT_MODEL_LIST=[{"backend": "huggingface", "model_name_or_path": "Qwen/Qwen3-1.7B", "support_models": ["Qwen/Qwen3-1.7B"]}]
+    ```
+
+    <Warning>
+      本地 HuggingFace 模型需要在您的环境中安装 PyTorch。强烈推荐 CUDA 启用的 GPU 以获得可接受的推理速度。
+    </Warning>
+  </Tab>
+</Tabs>
+
+---
+
+## Memory Reader 模型
+
+Memory Reader 是用于文档分块和从文件中提取记忆等任务的独立模型。独立配置它以使用与您主聊天模型不同的模型或 API 密钥：
+
+```env
+MEMRADER_MODEL=qwen3-max
+MEMRADER_API_KEY=your-api-key
+MEMRADER_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+您可以将 `MEMRADER_API_BASE` 指向与聊天模型相同的提供商，也可以指向不同的提供商。
+
+---
+
+## 嵌入器配置
+
+MemOS 使用嵌入器将记忆和查询转换为向量以进行语义搜索。独立于聊天模型配置嵌入器后端。
+
+| 变量 | 用途 |
+|---|---|
+| `MOS_EMBEDDER_BACKEND` | 嵌入后端：`universal_api` 或 `ollama` |
+| `MOS_EMBEDDER_MODEL` | 模型名称或路径 |
+| `MOS_EMBEDDER_API_BASE` | 嵌入端点的基础 URL |
+| `MOS_EMBEDDER_API_KEY` | 嵌入端点的 API 密钥 |
+| `EMBEDDING_DIMENSION` | 您模型输出的向量维度 |
+
+<Tabs>
+  <Tab title="OpenAI 嵌入">
+    ```env
+    MOS_EMBEDDER_BACKEND=universal_api
+    MOS_EMBEDDER_MODEL=text-embedding-3-large
+    MOS_EMBEDDER_API_BASE=https://api.openai.com/v1
+    MOS_EMBEDDER_API_KEY=sk-...
+    EMBEDDING_DIMENSION=3072
+    ```
+  </Tab>
+  <Tab title="Qwen 嵌入 (DashScope)">
+    ```env
+    MOS_EMBEDDER_BACKEND=universal_api
+    MOS_EMBEDDER_MODEL=text-embedding-v4
+    MOS_EMBEDDER_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+    MOS_EMBEDDER_API_KEY=your-dashscope-api-key
+    EMBEDDING_DIMENSION=1024
+    ```
+  </Tab>
+  <Tab title="Ollama 嵌入">
+    ```env
+    MOS_EMBEDDER_BACKEND=ollama
+    MOS_EMBEDDER_MODEL=nomic-embed-text:latest
+    MOS_EMBEDDER_API_BASE=http://localhost:11434
+    EMBEDDING_DIMENSION=768
+    ```
+
+    先拉取模型：`ollama pull nomic-embed-text:latest`
+  </Tab>
+  <Tab title="自定义 OpenAI 兼容">
+    ```env
+    MOS_EMBEDDER_BACKEND=universal_api
+    MOS_EMBEDDER_MODEL=your-embedding-model
+    MOS_EMBEDDER_API_BASE=http://your-host:8081/v1
+    MOS_EMBEDDER_API_KEY=your-api-key
+    EMBEDDING_DIMENSION=1024
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  将 `EMBEDDING_DIMENSION` 设置为与您所选模型的精确输出维度匹配。不匹配会在运行时导致向量存储错误。常见值：`768` (nomic-embed-text)、`1024` (text-embedding-v4)、`1536` (text-embedding-ada-002)、`3072` (text-embedding-3-large)。
+</Warning>
+
+---
+
+## 重排器
+
+在向量检索之后，MemOS 可选地对结果重排以提高相关性。使用以下设置重排器后端：
+
+```env
+MOS_RERANKER_BACKEND=cosine_local
+```
+
+| 值 | 描述 |
+|---|---|
+| `cosine_local` | 默认。使用本地余弦相似度重排 —— 无需额外服务。 |
+| `http_bge` | 使用外部 BGE 重排器 HTTP 服务以获得更高质量的重排。 |
+
+除非您部署了 BGE 重排器服务并需要更高的检索精度，否则使用 `cosine_local`。

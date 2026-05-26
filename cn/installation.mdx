@@ -1,0 +1,273 @@
+---
+title: "安装 MemOS：Docker、pip 或源代码"
+description: "使用 Docker 进行生产部署、pip 用于快速本地使用，或从源代码安装用于开发。涵盖环境设置、LLM 提供商和服务器启动。"
+---
+
+MemOS 作为本地服务器运行，并暴露一个您的 Agent 在运行时调用的 REST API。您可以通过三种方式安装：Docker（推荐用于生产）、pip（最快的本地实验）或源代码（最适合开发和贡献）。三种方法都会得到相同的运行中 API 服务器。
+
+<Tabs>
+  <Tab title="Docker">
+    Docker 是生产部署的推荐路径。它通过 `docker compose` 自动处理服务依赖项 —— 包括向量数据库和图数据库。
+
+    <Steps>
+      <Step title="克隆仓库">
+        ```bash
+        git clone https://github.com/MemTensor/MemOS.git
+        cd MemOS
+        ```
+      </Step>
+
+      <Step title="创建您的 .env 文件">
+        MemOS 服务器从环境变量读取所有配置。在项目根目录创建一个 `.env` 文件：
+
+        ```bash
+        touch .env
+        ```
+
+        <Warning>
+          `.env` 文件必须放在 MemOS 项目根目录中，而不是 `docker/` 子目录里。
+        </Warning>
+
+        使用您的模型和基础设施凭证填充它。以下是一个最小可工作配置：
+
+        ```bash
+        # LLM configuration (required)
+        OPENAI_API_KEY=sk-your-key-here
+        OPENAI_API_BASE=https://api.openai.com/v1
+        MOS_CHAT_MODEL=gpt-4o-mini
+
+        # Embedder configuration (required)
+        MOS_EMBEDDER_MODEL=text-embedding-v4
+        MOS_EMBEDDER_BACKEND=universal_api
+        MOS_EMBEDDER_API_BASE=https://api.openai.com/v1
+        MOS_EMBEDDER_API_KEY=sk-your-key-here
+        EMBEDDING_DIMENSION=1024
+        MOS_RERANKER_BACKEND=cosine_local
+
+        # Neo4j for tree memory (required if using graph memory)
+        NEO4J_BACKEND=neo4j-community
+        NEO4J_URI=bolt://localhost:7687
+        NEO4J_USER=neo4j
+        NEO4J_PASSWORD=12345678
+        NEO4J_DB_NAME=neo4j
+
+        # Redis scheduler (optional, set true to enable async scheduling)
+        DEFAULT_USE_REDIS_QUEUE=false
+
+        # Chat API
+        ENABLE_CHAT_API=true
+        CHAT_MODEL_LIST=[{"backend": "openai", "api_base": "https://api.openai.com/v1", "api_key": "sk-your-key-here", "model_name_or_path": "gpt-4o-mini", "support_models": ["gpt-4o-mini"]}]
+        ```
+
+        <Note>
+          MemOS 支持多个 LLM 提供商。设置 `MOS_CHAT_MODEL_PROVIDER` 以切换后端：`openai`、`qwen`、`deepseek`、`minimax`、`ollama`、`huggingface` 或 `vllm`。请参阅 [LLM 提供商指南](/cn/integrations/llm-providers) 了解各提供商的具体配置。
+        </Note>
+      </Step>
+
+      <Step title="构建并启动服务">
+        进入 `docker/` 目录，并使用 Docker Compose 启动服务：
+
+        ```bash
+        cd docker
+        docker compose up
+        ```
+
+        Docker Compose 启动 MemOS 服务器以及所有必需的依赖。首次运行会下载基础镜像，可能需要几分钟。
+
+        启动后，API 可在 [http://localhost:8000](http://localhost:8000) 访问。打开 [http://localhost:8000/docs](http://localhost:8000/docs) 验证服务器是否启动并浏览交互式 API 文档。
+      </Step>
+    </Steps>
+
+    #### Docker 镜像选项
+
+    MemOS 为 x86 和 ARM 架构提供两种镜像变体：
+
+    | 变体 | 镜像 | 适用场景 |
+    | --- | --- | --- |
+    | Lite (x86) | `registry.cn-shanghai.aliyuncs.com/memtensor/memos-base:v1.0` | 快速本地部署、更小的镜像 |
+    | Lite (ARM) | `registry.cn-shanghai.aliyuncs.com/memtensor/memos-base-arm:v1.0` | Apple Silicon 和 ARM 服务器 |
+    | Full (x86) | `registry.cn-shanghai.aliyuncs.com/memtensor/memos-full-base:v1.0.0` | 所有功能，无需手动配置依赖 |
+    | Full (ARM) | `registry.cn-shanghai.aliyuncs.com/memtensor/memos-full-base-arm:v1.0.0` | ARM 上的完整功能 |
+
+    Lite 镜像省略了体积较大的 GPU 相关依赖以加快下载。Full 镜像预构建了 MemOS 的所有依赖。
+  </Tab>
+
+  <Tab title="pip">
+    pip 安装是在本地运行 MemOS 的最简单方式。当您需要快速实验或不需要 Docker 时使用此路径。
+
+    <Steps>
+      <Step title="创建虚拟环境（推荐）">
+        为了避免依赖冲突，请创建一个专用的 Python 环境。需要 Python 3.10 或更高版本。
+
+        ```bash
+        conda create -n memos python=3.11
+        conda activate memos
+        ```
+
+        如果您更喜欢，也可以使用 `venv`：
+
+        ```bash
+        python -m venv .venv
+        source .venv/bin/activate
+        ```
+      </Step>
+
+      <Step title="从 PyPI 安装 MemOS">
+        安装所有可选组件：
+
+        ```bash
+        pip install -U "MemoryOS[all]"
+        ```
+
+        验证安装：
+
+        ```bash
+        python -c "import memos; print(memos.__version__)"
+        ```
+
+        #### 可选依赖分组
+
+        如果您想要更轻量的安装，可以仅选择所需的功能：
+
+        | 功能 | 安装命令 |
+        | --- | --- |
+        | 树状记忆 (Neo4j 图) | `pip install "MemoryOS[tree-mem]"` |
+        | 记忆读取器 (文档/URL 摄取) | `pip install "MemoryOS[mem-reader]"` |
+        | 记忆调度器 (Redis 异步) | `pip install "MemoryOS[mem-scheduler]"` |
+        | 偏好记忆 (Milvus) | `pip install "MemoryOS[pref-mem]"` |
+        | 同时安装多个 | `pip install "MemoryOS[tree-mem,mem-reader]"` |
+      </Step>
+
+      <Step title="创建您的 .env 文件">
+        MemOS 不会自动加载 `.env` 文件 —— 您需要在启动时显式传入。在您的工作目录中创建文件：
+
+        ```bash
+        touch .env
+        ```
+
+        最小配置：
+
+        ```bash
+        CHAT_MODEL_LIST='[
+          {
+            "name": "default",
+            "backend": "openai",
+            "config": {
+              "model": "gpt-4o-mini",
+              "api_key": "YOUR_API_KEY"
+            }
+          }
+        ]'
+
+        # Optional
+        MEMOS_LOG_LEVEL=INFO
+        ```
+      </Step>
+
+      <Step title="启动服务器">
+        使用 `python-dotenv` 加载您的 `.env` 文件并启动服务器：
+
+        ```bash
+        python -m dotenv run -- \
+          uvicorn memos.api.server_api:app \
+          --host 0.0.0.0 \
+          --port 8000
+        ```
+
+        启动成功后，您将看到：
+
+        ```text
+        INFO:     Uvicorn running on http://0.0.0.0:8000
+        INFO:     Application startup complete.
+        ```
+
+        API 现已在 [http://localhost:8000](http://localhost:8000) 可用。
+      </Step>
+
+      <Step title="下载示例文件（可选）">
+        要获取示例代码、数据和配置文件：
+
+        ```bash
+        memos download_examples
+        ```
+      </Step>
+    </Steps>
+
+    #### 其他后端
+
+    **Ollama** —— 要通过 Ollama 使用本地模型，请先安装 Ollama CLI：
+
+    ```bash
+    curl -fsSL https://ollama.com/install.sh | sh
+    ```
+
+    **Neo4j** —— 如果您打算使用基于图的树状记忆，请安装 [Neo4j Desktop](https://neo4j.com/download/) 并在您的 `.env` 文件中设置 `NEO4J_BACKEND=neo4j`。
+  </Tab>
+
+  <Tab title="从源代码">
+    当您想要探索或扩展 MemOS、运行测试或为项目做贡献时，请从源代码安装。
+
+    <Steps>
+      <Step title="克隆仓库">
+        ```bash
+        git clone https://github.com/MemTensor/MemOS.git
+        cd MemOS
+        ```
+      </Step>
+
+      <Step title="以可编辑模式安装">
+        ```bash
+        pip install -e .
+        pip install --no-cache-dir -r ./docker/requirements.txt
+        ```
+
+        将 `PYTHONPATH` 设置为指向 `src/` 目录，以便 Python 能找到 `memos` 包：
+
+        ```bash
+        export PYTHONPATH=/path/to/MemOS/src
+        ```
+
+        将 `/path/to/MemOS` 替换为您克隆的仓库的绝对路径。
+      </Step>
+
+      <Step title="创建您的 .env 文件">
+        在项目根目录创建一个 `.env` 文件。请参考上面的 Docker 标签页，了解环境变量的完整列表和工作配置示例。
+
+        <Warning>
+          `.env` 文件必须放在 MemOS 项目根目录中。
+        </Warning>
+
+        对于树状记忆（基于图），设置 `NEO4J_BACKEND=neo4j` 并确保在启动服务器之前 Neo4j Desktop 正在运行。
+      </Step>
+
+      <Step title="启动服务器">
+        在项目根目录中，使用 uvicorn 启动服务器：
+
+        ```bash
+        uvicorn memos.api.server_api:app --host 0.0.0.0 --port 8000 --workers 1
+        ```
+
+        API 可在 [http://localhost:8000](http://localhost:8000) 访问。打开 [http://localhost:8000/docs](http://localhost:8000/docs) 确认服务器正在运行。
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## 支持的 LLM 提供商
+
+MemOS 可与以下任何 LLM 后端配合使用。在您的 `.env` 文件中通过 `CHAT_MODEL_LIST` 内的 `backend` 字段设置提供商。
+
+| 提供商 | Backend 值 |
+| --- | --- |
+| OpenAI | `openai` |
+| Azure OpenAI | `azure` |
+| Qwen (DashScope / Bailian) | `qwen` |
+| DeepSeek | `deepseek` |
+| MiniMax | `minimax` |
+| Ollama (本地) | `ollama` |
+| HuggingFace Transformers | `huggingface` |
+| vLLM | `vllm` |
+
+## 下一步
+
+一旦您的服务器在 `http://localhost:8000` 运行起来，请按照 [快速开始](/cn/quickstart) 添加并搜索您的第一条记忆。

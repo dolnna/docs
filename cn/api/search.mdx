@@ -1,0 +1,257 @@
+---
+title: '搜索记忆 —— POST /product/search'
+description: '跨一个或多个 MemCube 运行语义搜索，并为用户检索最相关的文本、动作和偏好记忆。'
+---
+
+Search 端点跨您指定的 MemCube 执行语义检索，按与查询的相关性对结果排序。MemOS 使用基于嵌入的相似度，并配合可选的 MMR 去重通道，以返回多样化的高置信度记忆。结果按记忆类型分组 —— `text_mem` 用于事实和对话记忆，`act_mem` 用于动作/工具记忆，`para_mem` 用于偏好记忆 —— 因此您的应用可以独立消费每一层。
+
+## 端点
+
+```
+POST /product/search
+```
+
+## 请求体
+
+<ParamField body="query" type="string" required>
+  要搜索的自然语言查询，例如 `"What does the user like to eat?"`。
+</ParamField>
+
+<ParamField body="user_id" type="string" required>
+  您正在搜索其记忆的用户的唯一标识符。
+</ParamField>
+
+<ParamField body="readable_cube_ids" type="string[]" required>
+  要搜索的 MemCube ID 列表。您必须对列出的每个 cube 拥有读取权限。
+</ParamField>
+
+<ParamField body="top_k" type="number" default="10">
+  返回的最大文本记忆数。必须至少为 `1`。默认：`10`。
+</ParamField>
+
+<ParamField body="mode" type="string" default="fast">
+  搜索模式。`"fast"` 使用近似最近邻查找。`"fine"` 以更高延迟运行更彻底的重排序通道。`"mixture"` 结合两者。
+</ParamField>
+
+<ParamField body="relativity" type="number" default="0.45">
+  最低相关性分数阈值。`relativity` 分数低于此值的记忆将从结果中排除。设置为 `0` 以禁用阈值过滤。默认：`0.45`。
+</ParamField>
+
+<ParamField body="dedup" type="string" default="mmr">
+  文本记忆的去重策略。`"mmr"` 应用最大边际相关性以最大化多样性。`"sim"` 通过余弦相似度移除近似重复的记忆。`"no"` 禁用去重。默认：`"mmr"`。
+</ParamField>
+
+<ParamField body="include_preference" type="boolean" default="true">
+  当为 `true` 时，与查询相关的偏好记忆会与通用记忆一起包含在响应中。
+</ParamField>
+
+<ParamField body="pref_top_k" type="number" default="6">
+  当 `include_preference` 为 `true` 时返回的最大偏好记忆数。
+</ParamField>
+
+<ParamField body="session_id" type="string">
+  可选的会话标识符，用作软信号以将结果加权偏向当前对话上下文。
+</ParamField>
+
+<ParamField body="filter" type="object">
+  在评分前应用于记忆元数据的结构化过滤器。支持 `and` / `or` 组合。
+
+  <Expandable title="filter examples">
+    ```json
+    {
+      "and": [
+        { "created_at": { "gt": "2025-01-01" } },
+        { "tags": "travel" }
+      ]
+    }
+    ```
+  </Expandable>
+</ParamField>
+
+## 响应
+
+<ResponseField name="code" type="number" required>
+  HTTP 风格的状态码。成功时为 `200`。
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  人类可读的状态消息，例如 `"Search completed successfully"`。
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  按记忆类型分组的搜索结果。
+
+  <Expandable title="data object">
+    <ResponseField name="data.text_mem" type="object[]">
+      文本记忆的 MemCube 结果分组列表。每个条目对应一个 MemCube。
+
+      <Expandable title="text_mem entry">
+        <ResponseField name="cube_id" type="string">
+          检索到此组结果的 MemCube ID。
+        </ResponseField>
+        <ResponseField name="memories" type="object[]">
+          匹配记忆的排名列表。
+
+          <Expandable title="memory object">
+            <ResponseField name="id" type="string">
+              唯一的记忆标识符（UUID）。
+            </ResponseField>
+            <ResponseField name="memory" type="string">
+              提取的记忆文本。
+            </ResponseField>
+            <ResponseField name="ref_id" type="string">
+              简短引用标识符，例如 `"[2f40be8f]"`。
+            </ResponseField>
+            <ResponseField name="metadata" type="object">
+              <Expandable title="metadata fields">
+                <ResponseField name="metadata.user_id" type="string">
+                  此记忆所属的用户。
+                </ResponseField>
+                <ResponseField name="metadata.session_id" type="string">
+                  创建此记忆的会话。
+                </ResponseField>
+                <ResponseField name="metadata.type" type="string">
+                  记忆的语义类型，例如 `"fact"` 或 `"preference"`。
+                </ResponseField>
+                <ResponseField name="metadata.memory_type" type="string">
+                  内部记忆类，例如 `"UserMemory"`。
+                </ResponseField>
+                <ResponseField name="metadata.confidence" type="number">
+                  模型置信度分数，介于 `0` 和 `1` 之间。
+                </ResponseField>
+                <ResponseField name="metadata.relativity" type="number">
+                  与搜索查询的相关性分数。
+                </ResponseField>
+                <ResponseField name="metadata.tags" type="string[]">
+                  附加到记忆的标签。
+                </ResponseField>
+                <ResponseField name="metadata.status" type="string">
+                  激活状态，例如 `"activated"`。
+                </ResponseField>
+                <ResponseField name="metadata.key" type="string">
+                  记忆的简短描述键。
+                </ResponseField>
+                <ResponseField name="metadata.background" type="string">
+                  描述创建此记忆的原因的上下文语句。
+                </ResponseField>
+                <ResponseField name="metadata.created_at" type="string">
+                  记忆创建时的 ISO 8601 时间戳。
+                </ResponseField>
+                <ResponseField name="metadata.updated_at" type="string">
+                  记忆最后更新时的 ISO 8601 时间戳。
+                </ResponseField>
+              </Expandable>
+            </ResponseField>
+          </Expandable>
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="data.act_mem" type="object[]">
+      动作和工具使用记忆的结果。与 `text_mem` 结构相同。
+    </ResponseField>
+
+    <ResponseField name="data.para_mem" type="object[]">
+      参数/偏好记忆的结果。与 `text_mem` 结构相同。
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## 示例
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/search \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "query": "What do I like to eat?",
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "top_k": 5
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/search",
+    json={
+        "query": "What do I like to eat?",
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "top_k": 5,
+    },
+)
+data = response.json()
+for cube in data["data"]["text_mem"]:
+    for memory in cube["memories"]:
+        print(memory["memory"], "—", memory["metadata"]["confidence"])
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Search completed successfully",
+  "data": {
+    "text_mem": [
+      {
+        "cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+        "memories": [
+          {
+            "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+            "memory": "[user opinion] User likes strawberries.",
+            "ref_id": "[2f40be8f]",
+            "metadata": {
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "session_id": "root_session",
+              "status": "activated",
+              "type": "fact",
+              "key": "User's preference for strawberries",
+              "confidence": 0.99,
+              "tags": ["preference", "strawberries"],
+              "memory_type": "UserMemory",
+              "relativity": 0.6349761312470591,
+              "background": "User expressed a preference for strawberries, indicating a tendency in dietary preferences.",
+              "created_at": "2025-09-18T08:23:44.625511+00:00",
+              "updated_at": "2025-09-18T08:23:44.625479+00:00",
+              "sources": [],
+              "source": null,
+              "visibility": null
+            }
+          }
+        ]
+      }
+    ],
+    "act_mem": [],
+    "para_mem": []
+  }
+}
+```
+
+## 错误响应
+
+| Code | 描述 |
+|------|-------------|
+| `400` | 请求体格式错误。 |
+| `422` | 验证错误 —— 缺少必需字段或参数值无效。 |
+| `500` | 搜索执行期间发生内部错误。 |
+
+```json 422
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["body", "query"],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```

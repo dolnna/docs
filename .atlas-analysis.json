@@ -1,0 +1,120 @@
+{
+  "projectType": "saas",
+  "projectName": "MemOS",
+  "projectDescription": "A Memory Operating System for LLMs and AI agents that unifies memory storage, retrieval, and management to enable context-aware, personalized interactions with 35% token savings.",
+  "theme": "luma",
+  "primaryColor": "#4b56ef",
+  "lightColor": "#ffffff",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/overview",
+              "concepts/mem-cube",
+              "concepts/memory-types",
+              "concepts/mem-scheduler"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/add-search-memory",
+              "guides/chat-with-memory",
+              "guides/feedback-correction",
+              "guides/multi-cube",
+              "guides/mcp-integration"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/openclaw-plugin",
+              "integrations/hermes-plugin",
+              "integrations/llm-providers"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/memory-backends",
+              "configuration/deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Memory API",
+            "pages": [
+              "api/add",
+              "api/search",
+              "api/get-memory",
+              "api/delete-memory",
+              "api/feedback"
+            ]
+          },
+          {
+            "group": "Chat API",
+            "pages": [
+              "api/chat-complete",
+              "api/chat-stream"
+            ]
+          },
+          {
+            "group": "Scheduler API",
+            "pages": [
+              "api/scheduler-status",
+              "api/scheduler-wait"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Unified Memory API for add, search, edit, and delete across text, image, and tool memories",
+    "Multi-Cube Knowledge Base Management for isolated, composable memory spaces per user or project",
+    "Asynchronous MemScheduler with Redis Streams for production-grade concurrent memory ingestion",
+    "Memory Feedback & Correction via natural language to refine and update stored memories",
+    "Hybrid retrieval combining vector search and graph traversal for high-accuracy recall",
+    "MCP (Model Context Protocol) integration for connecting AI assistants to MemOS",
+    "OpenClaw and Hermes Agent plugins with 35–72% token reduction",
+    "Self-hosted (Docker/pip) and Cloud API deployment options",
+    "35.24% memory token savings and +43.70% accuracy over OpenAI Memory"
+  ],
+  "publicApiSurface": [
+    "POST /product/add — Add memories from chat messages or documents",
+    "POST /product/search — Semantic search across memory cubes",
+    "POST /product/get_all — Retrieve all memories for a user",
+    "GET /product/get_memory/{memory_id} — Get a memory by ID",
+    "POST /product/delete_memory — Delete memories by ID",
+    "POST /product/feedback — Submit natural-language memory feedback",
+    "POST /product/chat/complete — Memory-augmented chat (non-streaming)",
+    "POST /product/chat/stream — Memory-augmented chat (SSE streaming)",
+    "GET /product/scheduler/status — Query async task status",
+    "GET /product/scheduler/allstatus — Get full scheduler metrics",
+    "POST /product/suggestions — Get suggested follow-up queries",
+    "MOS.simple() — Python SDK auto-configured MOS instance",
+    "MOS.chat(query) — Chat with memory retrieval and storage",
+    "GeneralMemCube — Python SDK memory container class",
+    "SingleCubeView / CompositeCubeView — View architecture for add/search operations",
+    "memos CLI — Command-line interface (entry point: memos)",
+    "memos download_examples — CLI command to fetch example code"
+  ]
+}

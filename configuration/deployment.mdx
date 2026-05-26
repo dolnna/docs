@@ -1,0 +1,197 @@
+---
+title: "Deploy MemOS: Docker, pip, and Self-Hosted"
+description: "Deploy MemOS using the hosted cloud, Docker Compose, or pip. Covers service dependencies, deployment modes, and how to access your running instance."
+---
+
+MemOS gives you three ways to get a running memory API: use the hosted cloud service with no infrastructure to manage, deploy with Docker Compose for a reproducible self-hosted environment, or install via pip for maximum flexibility. All three expose the same REST API surface, so you can start on cloud and migrate to self-hosted later without changing your application code.
+
+---
+
+## Option 1: MemOS Cloud (hosted)
+
+The simplest option — no servers, no configuration, no dependencies. Sign up at [memos-dashboard.openmem.net](https://memos-dashboard.openmem.net), create an API key, and start making API calls immediately.
+
+The cloud API base URL is `https://api.openmem.net`. Use your API key in the `Authorization: Bearer` header on every request.
+
+This is the right choice if you want to get started quickly, prefer not to manage infrastructure, or need cross-device memory access for the OpenClaw plugin.
+
+---
+
+## Option 2: Docker Compose (recommended for self-hosted)
+
+Docker Compose is the recommended self-hosted deployment method. It starts MemOS and its service dependencies together in a reproducible configuration.
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/MemTensor/MemOS.git
+    cd MemOS
+    ```
+  </Step>
+
+  <Step title="Create your .env file">
+    Create a `.env` file in the project root directory. The `.env` file must be in the root, not inside the `docker/` subdirectory.
+
+    ```bash
+    touch .env
+    ```
+
+    Add your provider credentials and configuration. See [MemOS Environment Variable Reference](/configuration/environment-variables) for all available variables. A minimal example:
+
+    ```env
+    OPENAI_API_KEY=your-api-key
+    OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+    MOS_CHAT_MODEL=qwen3-max
+
+    MOS_EMBEDDER_BACKEND=universal_api
+    MOS_EMBEDDER_MODEL=text-embedding-v4
+    MOS_EMBEDDER_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+    MOS_EMBEDDER_API_KEY=your-api-key
+    EMBEDDING_DIMENSION=1024
+
+    MOS_TEXT_MEM_TYPE=naive_text
+    DEFAULT_USE_REDIS_QUEUE=false
+    ENABLE_CHAT_API=true
+    ```
+  </Step>
+
+  <Step title="Choose a deployment mode">
+    The `docker/` directory contains two modes:
+
+    | Mode | Description | When to use |
+    |---|---|---|
+    | **Quick** | Lightweight. No Neo4j. Uses `naive_text` or `general_text`. | Development, evaluation, deployments that don't need graph memory |
+    | **Full** | All features. Includes Neo4j and full dependency set. | Production with `tree_text` memory |
+
+    Both modes have separate image variants for ARM and x86 architectures.
+  </Step>
+
+  <Step title="Start the service">
+    ```bash
+    cd docker
+    docker compose up
+    ```
+
+    Docker Compose pulls the required images, loads your `.env`, and starts all services. The first build may take several minutes. After a successful start, you see:
+
+    ```text
+    INFO:     Uvicorn running on http://0.0.0.0:8000
+    INFO:     Application startup complete.
+    ```
+  </Step>
+
+  <Step title="Verify the deployment">
+    Open `http://localhost:8000/docs` in your browser to access the interactive API documentation and confirm the server is running.
+
+    To test with a quick curl:
+
+    ```bash
+    curl -X POST http://localhost:8000/product/add \
+      -H "Content-Type: application/json" \
+      -d '{
+        "messages": [{"role": "user", "content": "I prefer Python over JavaScript."}],
+        "user_id": "user-123",
+        "writable_cube_ids": ["your-cube-id"]
+      }'
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Option 3: pip install
+
+Use pip when you want to run MemOS directly in a Python environment, integrate it into an existing project, or develop against the source.
+
+<Steps>
+  <Step title="Create a Python environment">
+    Python 3.10 or later is required. A dedicated Conda environment avoids dependency conflicts:
+
+    ```bash
+    conda create -n memos python=3.11
+    conda activate memos
+    ```
+  </Step>
+
+  <Step title="Install MemoryOS">
+    Install with all optional dependencies:
+
+    ```bash
+    pip install -U "MemoryOS[all]"
+    ```
+
+    To install only what you need:
+
+    ```bash
+    # Tree memory (Neo4j) support
+    pip install "MemoryOS[tree-mem]"
+
+    # Async Redis scheduler
+    pip install "MemoryOS[mem-scheduler]"
+
+    # Memory Reader (document ingestion)
+    pip install "MemoryOS[mem-reader]"
+
+    # Multiple extras
+    pip install "MemoryOS[tree-mem,mem-reader,mem-scheduler]"
+    ```
+
+    Verify the installation:
+
+    ```bash
+    python -c "import memos; print(memos.__version__)"
+    ```
+  </Step>
+
+  <Step title="Create your .env file">
+    Create a `.env` file in your working directory and add your provider credentials. See [MemOS Environment Variable Reference](/configuration/environment-variables) for all available variables.
+  </Step>
+
+  <Step title="Start the server">
+    MemOS does not load `.env` files automatically. Use `python-dotenv` to inject the variables at startup:
+
+    ```bash
+    python -m dotenv run -- \
+      uvicorn memos.api.server_api:app \
+      --host 0.0.0.0 \
+      --port 8000
+    ```
+
+    For a single-worker setup (recommended during development):
+
+    ```bash
+    python -m dotenv run -- \
+      uvicorn memos.api.server_api:app \
+      --host 0.0.0.0 \
+      --port 8000 \
+      --workers 1
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Service dependencies
+
+Depending on your memory backend and configuration, MemOS may require additional running services:
+
+| Service | When required | Default connection |
+|---|---|---|
+| **Neo4j** | `MOS_TEXT_MEM_TYPE=tree_text` | `bolt://localhost:7687` |
+| **Qdrant** | `MOS_TEXT_MEM_TYPE=general_text`, or `tree_text` with `neo4j-community` | `localhost:6333` |
+| **Redis** | `DEFAULT_USE_REDIS_QUEUE=true` or `MOS_SCHEDULER_USE_REDIS_QUEUE=true` | `localhost:6379` |
+
+If you use `MOS_TEXT_MEM_TYPE=naive_text` and `DEFAULT_USE_REDIS_QUEUE=false`, no external services are required beyond the MemOS server itself.
+
+---
+
+## Accessing the running server
+
+| Resource | URL |
+|---|---|
+| Memory API | `http://localhost:8000` |
+| Interactive API docs (Swagger) | `http://localhost:8000/docs` |
+
+<Note>
+  The default port is `8000`. To run on a different port, change the `--port` flag in the uvicorn command or update the port mapping in your Docker Compose file.
+</Note>

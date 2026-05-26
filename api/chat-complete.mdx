@@ -1,0 +1,271 @@
+---
+title: 'Chat (complete) — POST /product/chat/complete'
+description: 'Send a message and receive a full memory-augmented reply. MemOS retrieves relevant memories, builds context, calls the LLM, and stores the exchange.'
+---
+
+The chat complete endpoint gives you a single-shot request-response cycle with MemOS's full memory pipeline. Before calling the LLM, MemOS searches the cubes you specify for relevant memories and user preferences, injects them into the system prompt, then generates a response. After the LLM responds, the exchange is asynchronously written back into memory so future turns benefit from what was said. Use this endpoint when your integration doesn't need streaming tokens — for example, in batch pipelines, server-side agents, or any flow where you collect the full answer before acting on it.
+
+<Note>
+  This endpoint requires `ENABLE_CHAT_API=true` in your environment. If the chat service is not initialized, the server returns a `503` error.
+</Note>
+
+## Endpoint
+
+```
+POST /product/chat/complete
+```
+
+## Request body
+
+<ParamField body="user_id" type="string" required>
+  The unique identifier for the user. MemOS uses this to scope memory retrieval and storage.
+</ParamField>
+
+<ParamField body="query" type="string" required>
+  The user's message or question.
+</ParamField>
+
+<ParamField body="readable_cube_ids" type="string[]">
+  List of MemCube IDs to retrieve context from. When omitted, MemOS falls back to the user's default cube.
+</ParamField>
+
+<ParamField body="writable_cube_ids" type="string[]">
+  List of MemCube IDs to store the new exchange into. When omitted, MemOS falls back to the user's default cube.
+</ParamField>
+
+<ParamField body="session_id" type="string">
+  Optional session identifier. MemOS uses this as a soft signal to surface memories that are more relevant to the current conversation context. Does not act as a hard filter.
+</ParamField>
+
+<ParamField body="history" type="object[]">
+  Prior conversation turns to include in the LLM context window. Each item must have a `role` (`"user"` or `"assistant"`) and a `content` string. At most the last 20 turns are used.
+
+  <Expandable title="message object">
+    <ParamField body="history[].role" type="string" required>
+      Role of the speaker. One of `"user"` or `"assistant"`.
+    </ParamField>
+    <ParamField body="history[].content" type="string" required>
+      Text content of the message.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="mode" type="string" default="fast">
+  Memory retrieval mode. `"fast"` runs a single-pass vector search. `"fine"` runs a deeper multi-pass search for higher recall at the cost of latency. `"mixture"` combines both strategies.
+</ParamField>
+
+<ParamField body="top_k" type="integer" default="10">
+  Maximum number of text memories to retrieve and inject into the prompt.
+</ParamField>
+
+<ParamField body="relativity" type="number" default="0.45">
+  Minimum relevance score for a memory to be included. Only memories with a `relativity` metadata value at or above this threshold are returned. Set to `0` to disable threshold filtering.
+</ParamField>
+
+<ParamField body="include_preference" type="boolean" default="true">
+  When `true`, MemOS also retrieves preference memories and appends them to the system prompt.
+</ParamField>
+
+<ParamField body="pref_top_k" type="integer" default="6">
+  Maximum number of preference memories to retrieve.
+</ParamField>
+
+<ParamField body="system_prompt" type="string">
+  Base system prompt to prepend before the memory context. When omitted, MemOS uses its built-in prompt template.
+</ParamField>
+
+<ParamField body="model_name_or_path" type="string">
+  Name of the LLM to use for this request. Must match one of the models registered in your server configuration. When omitted, the server's default model is used.
+</ParamField>
+
+<ParamField body="max_tokens" type="integer">
+  Maximum number of tokens to generate in the response. When omitted, the model default applies.
+</ParamField>
+
+<ParamField body="temperature" type="number">
+  Sampling temperature. Higher values produce more varied output. When omitted, the model default applies.
+</ParamField>
+
+<ParamField body="top_p" type="number">
+  Nucleus sampling parameter. When omitted, the model default applies.
+</ParamField>
+
+<ParamField body="add_message_on_answer" type="boolean" default="true">
+  When `true`, MemOS asynchronously stores the query and response as a new memory after the LLM replies. Set to `false` to skip the write-back step.
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Structured filter applied to memory retrieval. Supports `"and"` and `"or"` conditions with field predicates.
+
+  <Expandable title="filter example">
+    ```json
+    {
+      "and": [
+        { "created_at": { "gt": "2024-01-01" } }
+      ]
+    }
+    ```
+  </Expandable>
+</ParamField>
+
+<ParamField body="internet_search" type="boolean" default="false">
+  When `true`, MemOS augments memory retrieval with a live internet search to supplement stored memories with current web results.
+</ParamField>
+
+## Response
+
+<ResponseField name="code" type="number" required>
+  HTTP-style status code. `200` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable status message, for example `"Chat completed successfully"`.
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  Contains the assistant's reply.
+
+  <Expandable title="data object">
+    <ResponseField name="data.response" type="string" required>
+      The full text of the assistant's answer, with any `<think>…</think>` reasoning blocks stripped out.
+    </ResponseField>
+    <ResponseField name="data.reasoning" type="string | null">
+      Chain-of-thought text extracted from `<think>…</think>` tags, if the model produced any. `null` when the model did not emit a reasoning block.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/chat/complete \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "query": "What did I tell you about my dietary restrictions?",
+    "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "session_id": "session-abc-123"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/chat/complete",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "query": "What did I tell you about my dietary restrictions?",
+        "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "session_id": "session-abc-123",
+    },
+)
+data = response.json()
+print(data["data"]["response"])
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "message": "Chat completed successfully",
+  "data": {
+    "response": "You mentioned that you're allergic to nuts and prefer to avoid gluten when possible.",
+    "reasoning": null
+  }
+}
+```
+
+### Passing conversation history
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/chat/complete \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "query": "Can you recommend a recipe for tonight?",
+    "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "history": [
+      {
+        "role": "user",
+        "content": "I am vegetarian and I love Italian food."
+      },
+      {
+        "role": "assistant",
+        "content": "Great, I will keep that in mind!"
+      }
+    ]
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/chat/complete",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "query": "Can you recommend a recipe for tonight?",
+        "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "history": [
+            {"role": "user", "content": "I am vegetarian and I love Italian food."},
+            {"role": "assistant", "content": "Great, I will keep that in mind!"},
+        ],
+    },
+)
+print(response.json()["data"]["response"])
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "message": "Chat completed successfully",
+  "data": {
+    "response": "Based on your vegetarian preference and love of Italian food, here is a simple recipe for pasta al pomodoro tonight: cook spaghetti, toss with a sauce of crushed San Marzano tomatoes, garlic, olive oil, and fresh basil. Ready in under 20 minutes.",
+    "reasoning": null
+  }
+}
+```
+
+## Error responses
+
+| Code | Description |
+|------|-------------|
+| `400` | The `model_name_or_path` specified is not registered in the server configuration. |
+| `422` | Validation error — one or more fields failed type or constraint checks. The response body contains a `detail` array with per-field messages. |
+| `503` | The chat service is not available. Start the server with `ENABLE_CHAT_API=true`. |
+| `500` | Internal error during memory retrieval, LLM generation, or memory write-back. |
+
+```json 503
+{
+  "detail": "Chat service is not available. Chat handler not initialized."
+}
+```
+
+```json 422
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["body", "user_id"],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```

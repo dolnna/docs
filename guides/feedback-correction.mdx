@@ -1,0 +1,192 @@
+---
+title: "Correct and Improve Memory with Feedback"
+description: "Use the MemOS feedback endpoint to fix wrong facts, update preferences, and reinforce memories — without permanently destroying the original records."
+---
+
+Long-running AI agents accumulate memories over time, and some of those memories will be wrong. A user might correct a misremembered fact, update a preference, or rename a project. The `POST /product/feedback` endpoint handles these corrections: you provide a natural language correction in message form, and MemOS locates the conflicting memory, archives the old version, and writes the corrected one.
+
+Feedback is non-destructive. MemOS archives superseded memories rather than deleting them, so your system retains a version history you can audit or recover if needed.
+
+## What feedback can fix
+
+MemOS recognizes four categories of feedback automatically:
+
+| Category | Example | What happens |
+| --- | --- | --- |
+| **Correction** | "No, the meeting is in Shanghai, not Beijing." | Old memory is archived; new corrected memory is written. |
+| **Addition** | "Also, I am vegetarian." | New memory is added without affecting existing ones. |
+| **Keyword replacement** | "Change 'Project Alpha' to 'Project Vega' everywhere." | All affected memories are located and updated in batch. |
+| **Preference evolution** | "I have started drinking coffee now." | Existing preference is updated with the new context. |
+
+## Send a feedback correction
+
+<Steps>
+  <Step title="Build the request">
+
+    | Field | Type | Description |
+    | --- | --- | --- |
+    | `user_id` | string | The user whose memory to correct. |
+    | `writable_cube_ids` | string[] | The MemCubes to apply corrections to. |
+    | `history` | object[] | The conversation history that led to this correction — helps MemOS understand context. |
+    | `feedback_content` | string | The correction itself, in natural language. |
+    | `retrieved_memory_ids` | string[] | Optional. IDs of memories retrieved in the previous turn. Providing these accelerates correction by giving MemOS a precise target. |
+    | `async_mode` | string | `"sync"` waits for correction to complete; `"async"` returns a task ID immediately. |
+
+  </Step>
+  <Step title="Send the request">
+
+    Suppose a previous search returned a memory stating "User's meeting is in Beijing" — but the user corrects this:
+
+    <CodeGroup>
+
+    ```bash curl
+    curl -X POST https://your-memos-host/product/feedback \
+      -H "Content-Type: application/json" \
+      -d '{
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "history": [
+          {
+            "role": "user",
+            "content": "Where is my team meeting this Friday?"
+          },
+          {
+            "role": "assistant",
+            "content": "Your team meeting this Friday is scheduled in Beijing."
+          }
+        ],
+        "feedback_content": "That is wrong — the meeting is in Shanghai, not Beijing.",
+        "retrieved_memory_ids": ["mem-uuid-beijing-001"],
+        "async_mode": "sync"
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    response = requests.post(
+        "https://your-memos-host/product/feedback",
+        json={
+            "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "history": [
+                {
+                    "role": "user",
+                    "content": "Where is my team meeting this Friday?"
+                },
+                {
+                    "role": "assistant",
+                    "content": "Your team meeting this Friday is scheduled in Beijing."
+                }
+            ],
+            "feedback_content": "That is wrong — the meeting is in Shanghai, not Beijing.",
+            "retrieved_memory_ids": ["mem-uuid-beijing-001"],
+            "async_mode": "sync",
+        }
+    )
+
+    print(response.json())
+    ```
+
+    </CodeGroup>
+
+  </Step>
+  <Step title="Read the response">
+    A successful feedback correction returns the updated memory state:
+
+    ```json
+    {
+      "code": 200,
+      "message": "Feedback processed successfully",
+      "data": [
+        {
+          "action": "update",
+          "old_memory_id": "mem-uuid-beijing-001",
+          "new_memory_id": "mem-uuid-shanghai-002",
+          "memory": "User's team meeting this Friday is in Shanghai."
+        }
+      ]
+    }
+    ```
+
+    The `action` field tells you what MemOS did: `"update"` means the old memory was archived and replaced; `"add"` means a new memory was appended without conflict.
+  </Step>
+</Steps>
+
+<Tip>
+  Always pass `retrieved_memory_ids` when you have them. If you omit them, MemOS performs an additional search pass to find the target memory — which is slower and less precise than targeting a known memory ID directly.
+</Tip>
+
+## Alternative: route add requests as feedback
+
+If your application already uses `POST /product/add` and you want to flag a particular add as a correction rather than a fresh memory, set `is_feedback: true` on the add request:
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://your-memos-host/product/add \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+    "messages": [
+      {
+        "role": "user",
+        "content": "My phone number has changed to +1 555-0199."
+      }
+    ],
+    "async_mode": "sync",
+    "is_feedback": true
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "https://your-memos-host/product/add",
+    json={
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "messages": [
+            {
+                "role": "user",
+                "content": "My phone number has changed to +1 555-0199."
+            }
+        ],
+        "async_mode": "sync",
+        "is_feedback": True,
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+When `is_feedback` is `true`, the add handler routes the request through the same correction pipeline as the dedicated feedback endpoint — looking for conflicting memories and archiving them if found.
+
+## How MemOS processes a correction
+
+MemOS runs a five-step pipeline when it receives a feedback request:
+
+1. **Recognize intent** — Determines whether the feedback is a correction, addition, keyword replacement, or preference update.
+2. **Locate the target** — If you passed `retrieved_memory_ids`, the target is already known. Otherwise, MemOS searches the cube for likely candidates.
+3. **Compare** — The LLM compares the new information against the existing memory to decide whether to archive and replace (`UPDATE`) or simply append (`ADD`).
+4. **Safety check** — MemOS validates the proposed change — verifying IDs are correct and the scope of the edit is reasonable — before writing anything.
+5. **Write** — The old memory is archived with a status flag; the corrected memory is written as a new node. Both remain in the database.
+
+<Note>
+  Archived memories are soft-deleted — they no longer appear in search results but are preserved in the graph database. This gives you a full audit trail of how a user's memory has evolved over time.
+</Note>
+
+## Use cases
+
+- **Correcting wrong facts**: "You remembered my birthday as March 5th — it is actually March 15th."
+- **Updating preferences**: "I no longer drink alcohol, please remember that."
+- **Renaming entities**: "We are calling the product 'Horizon' now, not 'Atlas'."
+- **Reinforcing correct memories**: "Yes, exactly right — I do prefer window seats when flying."
+
+## Next steps
+
+- [Add and search memory](/guides/add-search-memory) — store the initial memories that feedback will later refine
+- [Chat with memory-augmented responses](/guides/chat-with-memory) — expose the corrected memories in conversation automatically

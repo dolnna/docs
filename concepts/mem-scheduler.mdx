@@ -1,0 +1,174 @@
+---
+title: "MemScheduler: Async Memory Processing in the Background"
+description: "Learn how MemScheduler processes memory operations asynchronously, when to use async vs. sync mode, and how to track task status by task_id."
+---
+
+MemScheduler is the background processing engine in MemOS. When you add memories using `async_mode: "async"`, MemOS doesn't wait for extraction, embedding, and storage to finish — it hands the work off to MemScheduler and returns a `task_id` immediately. MemScheduler then processes the operation in the background without blocking your application. This page explains when to use async mode, how the queue works, and how to monitor task progress.
+
+## How MemScheduler fits into the request flow
+
+When you submit an add request with `async_mode: "async"`:
+
+<Steps>
+  <Step title="Your request is accepted immediately">
+    MemOS validates your request and returns a response with a `task_id`. Your application continues without waiting.
+  </Step>
+  <Step title="The task enters the scheduler queue">
+    MemScheduler places your memory operation into the queue. Depending on your deployment configuration, this is either a local in-process queue or a Redis Stream.
+  </Step>
+  <Step title="MemScheduler processes the task in the background">
+    MemScheduler picks up the task, runs MemReader to extract structured memories, embeds them, and writes them into the target MemCube — all without any involvement from your application.
+  </Step>
+  <Step title="You poll for status (optional)">
+    If your application needs to know when the operation finishes, call `GET /product/scheduler/status` with your `user_id` and `task_id` to check the current status.
+  </Step>
+</Steps>
+
+## Async vs. sync: when to use each
+
+<Tabs>
+  <Tab title="Use async in production">
+    Async mode keeps your API fast. Memory extraction involves LLM calls and vector embedding — operations that can take hundreds of milliseconds. With async mode, your user-facing response time is decoupled from the time it takes to process and store memories.
+
+    **Use `async_mode: "async"` when:**
+
+    - You're handling concurrent users in production
+    - Response latency is important to your application
+    - You're ingesting large documents or long conversation histories
+    - You don't need immediate confirmation that the memory was stored
+
+    ```json
+    POST /product/add
+    {
+      "user_id": "user-abc",
+      "writable_cube_ids": ["user-abc-main"],
+      "messages": [
+        {"role": "user", "content": "I'm vegetarian and I prefer Italian food."}
+      ],
+      "async_mode": "async"
+    }
+    ```
+
+    Response:
+
+    ```json
+    {
+      "task_id": "task-7f3a9c1d-...",
+      "status": "queued"
+    }
+    ```
+  </Tab>
+  <Tab title="Use sync during development">
+    Sync mode blocks until MemOS finishes processing and confirms that memories were stored. This makes it easier to reason about state during development, testing, and debugging.
+
+    **Use `async_mode: "sync"` when:**
+
+    - You're testing that memory extraction works correctly
+    - You need to verify memories are stored before running a search in the same flow
+    - You're running integration tests or examples
+    - Throughput is not a concern
+
+    ```json
+    POST /product/add
+    {
+      "user_id": "user-abc",
+      "writable_cube_ids": ["user-abc-main"],
+      "messages": [
+        {"role": "user", "content": "I'm vegetarian and I prefer Italian food."}
+      ],
+      "async_mode": "sync"
+    }
+    ```
+
+    Response confirms completion — no polling needed.
+  </Tab>
+</Tabs>
+
+## Tracking task status
+
+After submitting an async add request, use the scheduler status endpoint to check on your task:
+
+```
+GET /product/scheduler/status?user_id=user-abc&task_id=task-7f3a9c1d-...
+```
+
+The response shows the task's current state:
+
+| Status | Meaning |
+|--------|---------|
+| `queued` | The task is waiting in the queue for a worker |
+| `running` | MemScheduler is actively processing the task |
+| `completed` | The memory operation finished successfully |
+| `failed` | The task encountered an error; check the response for details |
+
+<Note>
+  You only need to poll for status if your application logic depends on knowing when a memory was stored — for example, if you plan to immediately search for it. In most production flows, you can fire and forget async add requests.
+</Note>
+
+## Queue backends
+
+MemScheduler supports two queue backends. You select between them using the `MOS_SCHEDULER_USE_REDIS_QUEUE` environment variable.
+
+<CardGroup cols={2}>
+  <Card title="Local queue" icon="computer">
+    **For development and testing**
+
+    A fast, in-process queue with no external dependencies. Tasks are processed immediately in the same process. Data is lost if the process restarts.
+
+    Set `MOS_SCHEDULER_USE_REDIS_QUEUE=false`.
+
+    Use this when running MemOS locally, writing integration tests, or iterating on your application logic.
+  </Card>
+  <Card title="Redis Streams" icon="database">
+    **For production**
+
+    A durable, distributed queue backed by Redis Streams. Tasks persist across restarts, support consumer groups for load balancing across multiple MemOS instances, and can be inspected with standard Redis tooling.
+
+    Set `MOS_SCHEDULER_USE_REDIS_QUEUE=true` and configure your Redis connection.
+
+    Use this for all production deployments, especially multi-instance or high-throughput scenarios.
+  </Card>
+</CardGroup>
+
+## Task types handled by MemScheduler
+
+MemScheduler processes several types of background tasks. From your perspective as an API user, the most relevant are:
+
+<AccordionGroup>
+  <Accordion title="add — memory ingestion">
+    Triggered when you call `POST /product/add` with `async_mode: "async"`. MemScheduler runs MemReader to extract structured memories from your messages and writes them into the target MemCube.
+  </Accordion>
+  <Accordion title="mem_read — document ingestion">
+    Handles deep processing of external content — documents, files, or web URLs — converting them into structured memory items via MemReader.
+  </Accordion>
+  <Accordion title="mem_feedback — feedback processing">
+    Triggered when feedback is submitted (a user corrects an AI response). MemScheduler routes the feedback to MemFeedback, which locates and updates the relevant memories.
+  </Accordion>
+  <Accordion title="mem_organize — memory consolidation">
+    Runs periodic memory reorganization: merging duplicate memories, archiving stale ones, and maintaining the overall health of a MemCube over time.
+  </Accordion>
+</AccordionGroup>
+
+## Enabling MemScheduler
+
+MemScheduler is enabled via the `MOS_ENABLE_SCHEDULER` environment variable. When enabled, it starts automatically when the MemOS server initializes.
+
+```bash
+MOS_ENABLE_SCHEDULER=true
+MOS_SCHEDULER_USE_REDIS_QUEUE=true   # false for local queue
+```
+
+<Tip>
+  For production deployments, always use Redis Streams. The local queue does not survive process restarts — any unprocessed tasks will be lost if the server restarts unexpectedly.
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="MemCube" icon="box" href="/concepts/mem-cube">
+    Understand how writable and readable cube IDs work with async add requests.
+  </Card>
+  <Card title="Environment variables" icon="settings" href="/configuration/environment-variables">
+    Configure scheduler settings, Redis connection, and queue behavior.
+  </Card>
+</CardGroup>

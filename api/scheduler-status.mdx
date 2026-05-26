@@ -1,0 +1,374 @@
+---
+title: 'Scheduler status — GET /product/scheduler/status'
+description: 'Check the status of one task or all tasks for a user, inspect global scheduler health metrics, or query the raw Redis queue backlog for a user.'
+---
+
+MemOS processes memory operations — adds, searches triggered by chat, preference extraction — asynchronously through a background scheduler. These three endpoints let you observe what the scheduler is doing at different levels of granularity: per-task status for a specific user, aggregated health metrics for the whole scheduler, and raw queue depth for diagnosing backlog issues. You will most commonly use `GET /product/scheduler/status` after an async `POST /product/add` call to know when processing is done before issuing a search.
+
+## Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/product/scheduler/status` | Task-level status for one user or one specific task |
+| `GET` | `/product/scheduler/allstatus` | Aggregate counts across the whole scheduler |
+| `GET` | `/product/scheduler/task_queue_status` | Raw Redis stream queue depth for one user |
+
+---
+
+## GET /product/scheduler/status
+
+Returns the status of every tracked task for a user, or a single task when you provide a `task_id`.
+
+### Query parameters
+
+<ParamField query="user_id" type="string" required>
+  The user ID to look up tasks for.
+</ParamField>
+
+<ParamField query="task_id" type="string">
+  Optional task ID returned by a previous async operation (for example, `data.task_id` from `POST /product/add`). When provided, the response contains only that task's status. When omitted, all tasks for the user are returned.
+</ParamField>
+
+### Response
+
+<ResponseField name="code" type="number" required>
+  HTTP-style status code. `200` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable status message, for example `"Memory get status successfully"`.
+</ResponseField>
+
+<ResponseField name="data" type="object[]" required>
+  Array of task status items. Empty when the user has no tracked tasks.
+
+  <Expandable title="status item">
+    <ResponseField name="data[].task_id" type="string" required>
+      The ID of this task.
+    </ResponseField>
+    <ResponseField name="data[].status" type="string" required>
+      Current task state. One of:
+
+      - `"waiting"` — Queued, not yet picked up by a worker.
+      - `"in_progress"` — Actively being processed.
+      - `"completed"` — Finished successfully.
+      - `"failed"` — Terminated with an error.
+      - `"cancelled"` — Cancelled before completion.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Examples
+
+#### Check a specific task
+
+<CodeGroup>
+
+```bash cURL
+curl "http://localhost:8000/product/scheduler/status?user_id=8736b16e-1d20-4163-980b-a5063c3facdc&task_id=a1b2c3d4-5678-90ab-cdef-1234567890ab"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:8000/product/scheduler/status",
+    params={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "task_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory get status successfully",
+  "data": [
+    {
+      "task_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+      "status": "completed"
+    }
+  ]
+}
+```
+
+#### List all tasks for a user
+
+<CodeGroup>
+
+```bash cURL
+curl "http://localhost:8000/product/scheduler/status?user_id=8736b16e-1d20-4163-980b-a5063c3facdc"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:8000/product/scheduler/status",
+    params={"user_id": "8736b16e-1d20-4163-980b-a5063c3facdc"},
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory get status successfully",
+  "data": [
+    {
+      "task_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+      "status": "completed"
+    },
+    {
+      "task_id": "b9e3f210-1234-5678-abcd-ef0123456789",
+      "status": "in_progress"
+    }
+  ]
+}
+```
+
+#### Poll until a task completes
+
+```python Python
+import time
+import requests
+
+BASE_URL = "http://localhost:8000"
+USER_ID = "8736b16e-1d20-4163-980b-a5063c3facdc"
+TASK_ID = "a1b2c3d4-5678-90ab-cdef-1234567890ab"
+
+def wait_for_task(task_id: str, poll_interval: float = 1.0, timeout: float = 60.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        resp = requests.get(
+            f"{BASE_URL}/product/scheduler/status",
+            params={"user_id": USER_ID, "task_id": task_id},
+        )
+        resp.raise_for_status()
+        tasks = resp.json()["data"]
+        if tasks and tasks[0]["status"] in ("completed", "failed", "cancelled"):
+            return tasks[0]["status"]
+        time.sleep(poll_interval)
+    raise TimeoutError(f"Task {task_id} did not complete within {timeout}s")
+
+status = wait_for_task(TASK_ID)
+print(f"Task finished with status: {status}")
+```
+
+---
+
+## GET /product/scheduler/allstatus
+
+Returns aggregated task counts for the entire scheduler — useful for health checks and monitoring dashboards.
+
+### Query parameters
+
+None required.
+
+### Response
+
+<ResponseField name="code" type="number" required>
+  HTTP-style status code. `200` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable status message.
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  Aggregated scheduler metrics.
+
+  <Expandable title="data object">
+    <ResponseField name="data.scheduler_summary" type="object" required>
+      Live counts from the scheduler's queue monitor. Reflects the real-time queue depth when a queue monitor is available.
+
+      <Expandable title="TaskSummary fields">
+        <ResponseField name="waiting" type="integer">Number of tasks enqueued and not yet started.</ResponseField>
+        <ResponseField name="in_progress" type="integer">Number of tasks actively being processed.</ResponseField>
+        <ResponseField name="pending" type="integer">Number of tasks fetched by workers but not yet acknowledged.</ResponseField>
+        <ResponseField name="completed" type="integer">Number of tasks that completed successfully.</ResponseField>
+        <ResponseField name="failed" type="integer">Number of tasks that terminated with an error.</ResponseField>
+        <ResponseField name="cancelled" type="integer">Number of tasks that were cancelled.</ResponseField>
+        <ResponseField name="total" type="integer">Sum of all counted tasks.</ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="data.all_tasks_summary" type="object" required>
+      Counts derived from the persistent task status tracker across all users. These numbers include historical completed and failed tasks and may lag slightly behind the live scheduler view.
+
+      Contains the same fields as `scheduler_summary`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+
+```bash cURL
+curl "http://localhost:8000/product/scheduler/allstatus"
+```
+
+```python Python
+import requests
+
+response = requests.get("http://localhost:8000/product/scheduler/allstatus")
+print(response.json())
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Scheduler status summary retrieved successfully",
+  "data": {
+    "scheduler_summary": {
+      "waiting": 3,
+      "in_progress": 1,
+      "pending": 0,
+      "completed": 142,
+      "failed": 2,
+      "cancelled": 0,
+      "total": 148
+    },
+    "all_tasks_summary": {
+      "waiting": 3,
+      "in_progress": 1,
+      "pending": 0,
+      "completed": 150,
+      "failed": 2,
+      "cancelled": 0,
+      "total": 156
+    }
+  }
+}
+```
+
+---
+
+## GET /product/scheduler/task_queue_status
+
+Returns raw Redis stream metrics for one user's queue. Use this endpoint when you need to diagnose queue backlog issues at the Redis level.
+
+<Note>
+  This endpoint requires a Redis-backed scheduler. It returns `503` when the queue is not connected to Redis.
+</Note>
+
+### Query parameters
+
+<ParamField query="user_id" type="string" required>
+  The user ID whose queue streams you want to inspect.
+</ParamField>
+
+### Response
+
+<ResponseField name="code" type="number" required>
+  HTTP-style status code. `200` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable status message.
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  Queue metrics for the specified user.
+
+  <Expandable title="data object">
+    <ResponseField name="data.user_id" type="string" required>
+      The user ID the response is scoped to.
+    </ResponseField>
+    <ResponseField name="data.stream_keys" type="string[]" required>
+      The Redis stream keys matched for this user.
+    </ResponseField>
+    <ResponseField name="data.users_count" type="integer" required>
+      Number of distinct users present across all matched queue streams.
+    </ResponseField>
+    <ResponseField name="data.pending_tasks_count" type="integer" required>
+      Total number of tasks delivered to workers but not yet acknowledged (PEL size).
+    </ResponseField>
+    <ResponseField name="data.remaining_tasks_count" type="integer" required>
+      Total number of entries in the streams (`XLEN`), including tasks not yet delivered.
+    </ResponseField>
+    <ResponseField name="data.pending_tasks_detail" type="string[]" required>
+      Per-stream pending counts formatted as `"{stream_key}:{count}"`.
+    </ResponseField>
+    <ResponseField name="data.remaining_tasks_detail" type="string[]" required>
+      Per-stream remaining counts formatted as `"{stream_key}:{count}"`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+
+```bash cURL
+curl "http://localhost:8000/product/scheduler/task_queue_status?user_id=8736b16e-1d20-4163-980b-a5063c3facdc"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:8000/product/scheduler/task_queue_status",
+    params={"user_id": "8736b16e-1d20-4163-980b-a5063c3facdc"},
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Scheduler task queue status retrieved successfully",
+  "data": {
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "user_name": null,
+    "mem_cube_id": null,
+    "stream_keys": [
+      "memos:stream:8736b16e-1d20-4163-980b-a5063c3facdc:b32d0977-435d-4828-a86f-4f47f8b55bca:add"
+    ],
+    "users_count": 1,
+    "pending_tasks_count": 0,
+    "remaining_tasks_count": 2,
+    "pending_tasks_detail": [
+      "memos:stream:8736b16e-1d20-4163-980b-a5063c3facdc:b32d0977-435d-4828-a86f-4f47f8b55bca:add:0"
+    ],
+    "remaining_tasks_detail": [
+      "memos:stream:8736b16e-1d20-4163-980b-a5063c3facdc:b32d0977-435d-4828-a86f-4f47f8b55bca:add:2"
+    ]
+  }
+}
+```
+
+---
+
+## Error responses
+
+| Code | Description |
+|------|-------------|
+| `404` | The specified `task_id` was not found for this user (`/scheduler/status`), or no Redis streams exist for the user (`/scheduler/task_queue_status`). |
+| `503` | Scheduler queue is not connected to Redis (`/scheduler/task_queue_status` only). |
+| `500` | Internal error while reading task or queue state. |
+
+```json 404
+{
+  "detail": "Task a1b2c3d4-5678-90ab-cdef-1234567890ab not found for user 8736b16e-1d20-4163-980b-a5063c3facdc"
+}
+```

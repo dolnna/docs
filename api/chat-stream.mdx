@@ -1,0 +1,265 @@
+---
+title: 'Chat (stream) — POST /product/chat/stream'
+description: 'Send a message and receive a memory-augmented reply as an SSE stream. Tokens arrive as they are generated so your UI can update in real time.'
+---
+
+The chat stream endpoint runs the same memory-augmented pipeline as [chat complete](/api/chat-complete) — retrieving relevant memories, building a context-enriched system prompt, and writing the exchange back to memory — but streams the LLM's output token-by-token using Server-Sent Events (SSE). Each event carries a small JSON payload so your client can render partial responses progressively. Use this endpoint for interactive chat UIs, voice interfaces, or any integration where perceived latency matters. If you only need the finished response and don't want to handle an SSE stream, use [POST /product/chat/complete](/api/chat-complete) instead.
+
+<Note>
+  This endpoint requires `ENABLE_CHAT_API=true` in your environment. If the chat service is not initialized, the server returns a `503` error.
+</Note>
+
+## Endpoint
+
+```
+POST /product/chat/stream
+```
+
+## Request body
+
+<ParamField body="user_id" type="string" required>
+  The unique identifier for the user. MemOS uses this to scope memory retrieval and storage.
+</ParamField>
+
+<ParamField body="query" type="string" required>
+  The user's message or question.
+</ParamField>
+
+<ParamField body="readable_cube_ids" type="string[]">
+  List of MemCube IDs to retrieve context from. When omitted, MemOS falls back to the user's default cube.
+</ParamField>
+
+<ParamField body="writable_cube_ids" type="string[]">
+  List of MemCube IDs to write the new exchange into. When omitted, MemOS falls back to the user's default cube.
+</ParamField>
+
+<ParamField body="session_id" type="string">
+  Optional session identifier. Used as a soft signal to surface memories relevant to the current conversation. Does not act as a hard filter.
+</ParamField>
+
+<ParamField body="history" type="object[]">
+  Prior conversation turns to include in the LLM context window. At most the last 20 turns are used.
+
+  <Expandable title="message object">
+    <ParamField body="history[].role" type="string" required>
+      Role of the speaker. One of `"user"` or `"assistant"`.
+    </ParamField>
+    <ParamField body="history[].content" type="string" required>
+      Text content of the message.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="mode" type="string" default="fast">
+  Memory retrieval mode. `"fast"` runs a single-pass vector search. `"fine"` runs a deeper multi-pass search for higher recall at the cost of latency. `"mixture"` combines both strategies.
+</ParamField>
+
+<ParamField body="top_k" type="integer" default="10">
+  Maximum number of text memories to retrieve and inject into the prompt.
+</ParamField>
+
+<ParamField body="relativity" type="number" default="0.45">
+  Minimum relevance score for a memory to be included. Set to `0` to disable threshold filtering.
+</ParamField>
+
+<ParamField body="include_preference" type="boolean" default="true">
+  When `true`, MemOS retrieves preference memories and appends them to the system prompt.
+</ParamField>
+
+<ParamField body="pref_top_k" type="integer" default="6">
+  Maximum number of preference memories to retrieve.
+</ParamField>
+
+<ParamField body="system_prompt" type="string">
+  Base system prompt to prepend before the memory context. When omitted, MemOS uses its built-in prompt template.
+</ParamField>
+
+<ParamField body="model_name_or_path" type="string">
+  Name of the LLM to use. Must match one of the models registered in your server configuration. When omitted, the server's default model is used.
+</ParamField>
+
+<ParamField body="max_tokens" type="integer">
+  Maximum number of tokens to generate. When omitted, the model default applies.
+</ParamField>
+
+<ParamField body="temperature" type="number">
+  Sampling temperature. When omitted, the model default applies.
+</ParamField>
+
+<ParamField body="top_p" type="number">
+  Nucleus sampling parameter. When omitted, the model default applies.
+</ParamField>
+
+<ParamField body="add_message_on_answer" type="boolean" default="true">
+  When `true`, MemOS asynchronously writes the full exchange to memory after the stream ends. Set to `false` to skip the write-back step.
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Structured filter applied to memory retrieval. Supports `"and"` and `"or"` conditions.
+
+  <Expandable title="filter example">
+    ```json
+    {
+      "and": [
+        { "created_at": { "gt": "2024-01-01" } }
+      ]
+    }
+    ```
+  </Expandable>
+</ParamField>
+
+<ParamField body="internet_search" type="boolean" default="false">
+  When `true`, augments memory retrieval with a live internet search.
+</ParamField>
+
+## Response format
+
+The response is a continuous `text/event-stream` (SSE) stream. Each event is a line beginning with `data: ` followed by a JSON object, and events are separated by a blank line.
+
+### Event types
+
+<ResponseField name="type" type="string" required>
+  Identifies the kind of event. Possible values:
+
+  - `"text"` — A token or fragment of the assistant's reply. Concatenate all `"text"` payloads in order to reconstruct the full response.
+  - `"reasoning"` — A chain-of-thought fragment from inside a `<think>…</think>` block. Present only when the model emits reasoning tokens. Reasoning events precede the corresponding `"text"` events.
+  - `"error"` — A string describing an error that occurred during streaming. The connection closes after this event.
+</ResponseField>
+
+<ResponseField name="data" type="string" required>
+  The content of this event fragment.
+</ResponseField>
+
+**Example SSE stream**
+
+```
+data: {"type": "text", "data": "You"}
+
+data: {"type": "text", "data": " mentioned"}
+
+data: {"type": "text", "data": " that you prefer"}
+
+data: {"type": "text", "data": " window seats on flights."}
+```
+
+## Examples
+
+### curl
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/chat/stream \
+  --header 'Content-Type: application/json' \
+  --no-buffer \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "query": "What are my travel preferences?",
+    "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "session_id": "session-abc-123"
+  }'
+```
+
+The `-N` / `--no-buffer` flag disables curl's output buffering so you see each event as it arrives.
+
+### Python — consuming the SSE stream
+
+```python Python
+import json
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/chat/stream",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "query": "What are my travel preferences?",
+        "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "session_id": "session-abc-123",
+    },
+    stream=True,
+)
+
+full_response = ""
+for line in response.iter_lines():
+    if not line:
+        continue
+    # Each line is bytes; decode and strip the "data: " prefix
+    text = line.decode("utf-8")
+    if not text.startswith("data: "):
+        continue
+    event = json.loads(text[len("data: "):])
+    if event["type"] == "text":
+        full_response += event["data"]
+        print(event["data"], end="", flush=True)
+    elif event["type"] == "error":
+        print(f"\nStream error: {event['data']}")
+        break
+
+print()  # newline after stream ends
+print("Full response:", full_response)
+```
+
+### Python — using sseclient
+
+If you prefer a higher-level SSE library, install `sseclient-py` and use it as follows:
+
+```python Python
+import json
+import requests
+import sseclient
+
+response = requests.post(
+    "http://localhost:8000/product/chat/stream",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "query": "Remind me what I said about my diet.",
+        "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    },
+    stream=True,
+    headers={"Accept": "text/event-stream"},
+)
+
+client = sseclient.SSEClient(response)
+full_response = ""
+for event in client.events():
+    payload = json.loads(event.data)
+    if payload["type"] == "text":
+        full_response += payload["data"]
+        print(payload["data"], end="", flush=True)
+
+print()
+```
+
+**Sample SSE output**
+
+```
+data: {"type": "text", "data": "You"}
+
+data: {"type": "text", "data": " told me"}
+
+data: {"type": "text", "data": " you are allergic to nuts"}
+
+data: {"type": "text", "data": " and prefer to avoid gluten."}
+```
+
+## Error responses
+
+| Code | Description |
+|------|-------------|
+| `422` | Validation error — one or more fields failed type or constraint checks. |
+| `503` | The chat service is not available. Start the server with `ENABLE_CHAT_API=true`. |
+| `500` | Internal error. If the error occurs after the stream has started, it is delivered as a `{"type": "error", ...}` event rather than an HTTP status code. |
+
+```json 503
+{
+  "detail": "Chat service is not available. Chat handler not initialized."
+}
+```
+
+An in-stream error looks like this:
+
+```
+data: {"type": "error", "content": "Failed to connect to LLM provider."}
+```

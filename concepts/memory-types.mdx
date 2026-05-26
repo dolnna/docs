@@ -1,0 +1,176 @@
+---
+title: "Memory Types: Textual, Activation, and Parametric"
+description: "Learn about the three memory types in every MemCube — textual for searchable facts, activation for inference speed, and parametric for model personalization."
+---
+
+Every MemCube holds up to three types of memory, each optimized for a different purpose. Textual memory stores facts, preferences, and knowledge in a searchable form. Activation memory caches model computation states to speed up repeated inference. Parametric memory holds LoRA adapter weights for deep model personalization. Understanding the difference helps you choose the right storage approach for your application.
+
+<Tabs>
+  <Tab title="Textual memory (text_mem)">
+    Textual memory is the primary memory type for most applications. It stores extracted facts, user preferences, conversation insights, and structured knowledge in a retrievable form. When you call `POST /product/search`, the results you get back come from `text_mem`.
+
+    ### What gets stored
+
+    Each memory item has a `memory` field (the extracted text) and a `metadata` block with fields like:
+
+    - **`type`** — `"fact"`, `"preference"`, `"event"`, or `"procedure"`
+    - **`source`** — `"conversation"`, `"file"`, `"web"`, or `"retrieved"`
+    - **`confidence`** — a score from 0–100 indicating how certain the extraction is
+    - **`entities`** — key people, places, or concepts mentioned
+    - **`tags`** — thematic labels for filtering
+    - **`visibility`** — `"private"`, `"public"`, or `"session"`
+
+    ### What search results look like
+
+    ```json
+    {
+      "text_mem": [
+        {
+          "cube_id": "user-abc-main",
+          "memories": [
+            {
+              "id": "mem-001",
+              "memory": "User prefers dark mode and uses VS Code.",
+              "metadata": {
+                "type": "preference",
+                "confidence": 95,
+                "source": "conversation",
+                "entities": ["VS Code"],
+                "tags": ["editor", "preferences"]
+              }
+            }
+          ]
+        }
+      ]
+    }
+    ```
+
+    ### Textual memory backends
+
+    MemOS supports three backend options for textual memory, ranging from zero-dependency development setups to production-grade vector and graph stores:
+
+    <AccordionGroup>
+      <Accordion title="general_text — vector search with Qdrant">
+        The standard production backend. `GeneralTextMemory` stores memories as vector embeddings in Qdrant and retrieves them using semantic similarity search. It supports rich metadata filtering, scales to tens of thousands of memories per user, and works with any embedding model you configure.
+
+        **Best for:** Conversational agents, personal assistants, knowledge management systems.
+
+        **Requires:** A running Qdrant instance and a configured embedding model.
+      </Accordion>
+      <Accordion title="tree_text — graph memory with Neo4j">
+        `TreeTextMemory` stores memories as nodes in a Neo4j graph database, linking them with semantic relationships and hierarchies. It combines vector similarity search with graph traversal, enabling multi-hop reasoning — for example, finding memories connected through shared entities or causal chains.
+
+        **Best for:** Knowledge graphs, complex relationship reasoning, applications where understanding connections between facts matters as much as the facts themselves.
+
+        **Requires:** A running Neo4j instance, a vector database, and an embedding model.
+      </Accordion>
+      <Accordion title="naive_text — lightweight SQLite storage">
+        `NaiveTextMemory` uses in-memory storage backed by SQLite with keyword-based retrieval. It has zero external dependencies and is the fastest way to get started.
+
+        **Best for:** Rapid prototyping, demos, development environments, small-scale applications.
+
+        **Limitations:** No semantic vector search; not suited for large memory sets or production workloads.
+      </Accordion>
+    </AccordionGroup>
+
+    <Tip>
+      Start with `naive_text` to get up and running quickly. Switch to `general_text` (Qdrant) when you need semantic search in production, or `tree_text` (Neo4j) when your application needs to reason over relationships between memories.
+    </Tip>
+  </Tab>
+  <Tab title="Activation memory (act_mem)">
+    Activation memory stores precomputed key-value (KV) cache states from a HuggingFace language model. Instead of re-encoding the same background context on every request, you compute it once, save the KV cache, and inject it directly into the model's attention mechanism on subsequent calls.
+
+    ### How it works
+
+    When you have stable, frequently-used content — a system prompt, a domain FAQ, a user's long profile — you can pre-encode it into a KV cache. At inference time, the model skips the prefill computation for that content entirely, reducing Time To First Token (TTFT) and increasing throughput.
+
+    ```
+    Stable text content
+          │
+          ▼
+    Pre-compute KV cache ──► store in act_mem
+          │
+    At inference time:
+          ▼
+    Inject KV cache directly into attention ──► skip re-encoding
+    ```
+
+    ### When to use it
+
+    Activation memory is most valuable when:
+
+    - The same background context appears in many requests (e.g., a system prompt, a product FAQ, a user's long profile)
+    - You run HuggingFace models locally and want to reduce GPU computation
+    - You need to improve throughput in a high-volume chatbot or assistant
+
+    <Note>
+      Activation memory works with HuggingFace models only. It is not applicable when using OpenAI, Anthropic, or other closed API providers.
+    </Note>
+
+    ### In search results
+
+    When a search returns activation memory, it appears in the `act_mem` array of the response. For most API-based deployments, this array will be empty.
+
+    ```json
+    {
+      "text_mem": [...],
+      "act_mem": [],
+      "para_mem": []
+    }
+    ```
+  </Tab>
+  <Tab title="Parametric memory (para_mem)">
+    Parametric memory stores LoRA (Low-Rank Adaptation) adapter weights that encode personalized knowledge directly into a model's parameters. Rather than retrieving facts from a database at query time, parametric memory bakes that knowledge into the model itself — providing zero-latency access with no retrieval step.
+
+    ### How it works
+
+    You fine-tune a LoRA adapter on a user's or domain's specific knowledge, then store the adapter weights in `para_mem`. When the model is loaded with those weights, it already "knows" the personalized content — no retrieval needed.
+
+    ### When to use it
+
+    Parametric memory suits stable, evergreen knowledge that changes infrequently:
+
+    - Domain expertise that applies to every interaction (e.g., legal, medical, or product knowledge)
+    - User-specific skills or writing style
+    - Long-term preferences that have been validated and stabilized
+
+    <Note>
+      Parametric memory (LoRA adapter support) is under active development. Check the [MemOS changelog](https://github.com/MemTensor/MemOS) for availability updates.
+    </Note>
+
+    ### How memory types work together
+
+    Over time, MemOS can promote and demote memories between types based on usage patterns:
+
+    - **Frequently accessed** textual memories can be distilled into activation KV caches, removing redundant computation.
+    - **Stable, high-confidence** knowledge can be distilled further into parametric weights for zero-latency access.
+    - **Rarely used** parametric or activation entries can be demoted back to textual storage for auditability and retraining.
+
+    This lifecycle means your AI system doesn't just store data — it adapts its memory organization to how that data is actually used.
+  </Tab>
+</Tabs>
+
+## Choosing a textual memory backend
+
+If you're deciding which backend to configure for `text_mem`, use this comparison:
+
+| | `naive_text` | `general_text` | `tree_text` |
+|---|---|---|---|
+| **Backend** | In-memory / SQLite | Qdrant (vector DB) | Neo4j (graph DB) |
+| **Search method** | Keyword | Vector semantic | Vector + graph traversal |
+| **Semantic understanding** | No | Yes | Yes |
+| **Relationship reasoning** | No | No | Yes (multi-hop) |
+| **Scale** | Small (dev/demo) | Medium–large | Large |
+| **External dependencies** | None | Qdrant + embedder | Neo4j + Qdrant + embedder |
+| **Best for** | Prototyping | Most production use cases | Knowledge graphs, reasoning |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="MemCube" icon="box" href="/concepts/mem-cube">
+    See how memory types are organized inside a MemCube and how to reference them in API requests.
+  </Card>
+  <Card title="Memory backends configuration" icon="settings" href="/configuration/memory-backends">
+    Configure Qdrant, Neo4j, and embedding models for your deployment.
+  </Card>
+</CardGroup>

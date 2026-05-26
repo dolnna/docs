@@ -1,0 +1,324 @@
+---
+title: "Quickstart: Make your first memory API call"
+description: "Add and search your first memory in under 5 minutes — works with the MemOS Cloud API or a self-hosted instance. No prior setup needed for cloud."
+---
+
+This guide walks you through adding a memory and searching it back. You will send two API calls — one to store a fact from a conversation, and one to retrieve it with a semantic query. Choose the cloud path if you want to skip infrastructure setup entirely, or the self-hosted path if you already have a MemOS server running locally.
+
+## Choose your path
+
+<Tabs>
+  <Tab title="Cloud API">
+    The MemOS Cloud API is the fastest way to get started. You need an account and an API key — no server to run.
+
+    <Steps>
+      <Step title="Create an account and get your API key">
+        Sign up at [memos-dashboard.openmem.net](https://memos-dashboard.openmem.net). After signing in, navigate to **API Keys** in the dashboard and copy your key.
+
+        <Note>
+          Keep your API key private. Treat it like a password — do not commit it to source control.
+        </Note>
+      </Step>
+
+      <Step title="Add your first memory">
+        Send a `POST /product/add` request with a conversation message. MemOS extracts structured facts from the message content automatically.
+
+        <CodeGroup>
+          ```bash curl
+          curl --location --request POST 'https://api.openmem.net/product/add' \
+            --header 'Content-Type: application/json' \
+            --header 'Authorization: Bearer YOUR_API_KEY' \
+            --data-raw '{
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "I like strawberry"
+                }
+              ],
+              "async_mode": "sync"
+            }'
+          ```
+
+          ```python Python
+          import requests
+          import json
+
+          data = {
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+              "messages": [
+                  {
+                      "role": "user",
+                      "content": "I like strawberry"
+                  }
+              ],
+              "async_mode": "sync"
+          }
+          headers = {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer YOUR_API_KEY"
+          }
+          url = "https://api.openmem.net/product/add"
+
+          res = requests.post(url=url, headers=headers, data=json.dumps(data))
+          print(f"result: {res.json()}")
+          ```
+        </CodeGroup>
+
+        A successful response looks like:
+
+        ```json
+        {
+          "code": 200,
+          "message": "Memory created successfully",
+          "data": null
+        }
+        ```
+      </Step>
+
+      <Step title="Search your memory">
+        Now query back what you stored. MemOS uses semantic search — you do not need to match the exact words you stored.
+
+        <CodeGroup>
+          ```bash curl
+          curl --location --request POST 'https://api.openmem.net/product/search' \
+            --header 'Content-Type: application/json' \
+            --header 'Authorization: Bearer YOUR_API_KEY' \
+            --data-raw '{
+              "query": "What do I like",
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"]
+            }'
+          ```
+
+          ```python Python
+          import requests
+          import json
+
+          data = {
+              "query": "What do I like",
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"]
+          }
+          headers = {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer YOUR_API_KEY"
+          }
+          url = "https://api.openmem.net/product/search"
+
+          res = requests.post(url=url, headers=headers, data=json.dumps(data))
+          print(f"result: {res.json()}")
+          ```
+        </CodeGroup>
+
+        The response returns a ranked list of matching memories:
+
+        ```json
+        {
+          "code": 200,
+          "message": "Search completed successfully",
+          "data": {
+            "text_mem": [
+              {
+                "cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+                "memories": [
+                  {
+                    "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+                    "memory": "[user opinion] User likes strawberries.",
+                    "metadata": {
+                      "type": "fact",
+                      "key": "User's preference for strawberries",
+                      "confidence": 0.99,
+                      "tags": ["preference", "strawberries"],
+                      "relativity": 0.63
+                    },
+                    "ref_id": "[2f40be8f]"
+                  }
+                ]
+              }
+            ],
+            "act_mem": [],
+            "para_mem": []
+          }
+        }
+        ```
+
+        The `memory` field contains the fact MemOS extracted from your original message. The `relativity` score indicates semantic relevance to your query.
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="Self-hosted">
+    If you have a MemOS server running locally (see [Installation](/installation)), the base URL is `http://localhost:8000`. No API key is required by default for local deployments.
+
+    <Steps>
+      <Step title="Confirm your server is running">
+        Open [http://localhost:8000/docs](http://localhost:8000/docs) in your browser. You should see the interactive API documentation. If the page does not load, follow the [Installation guide](/installation) first.
+      </Step>
+
+      <Step title="Add your first memory">
+        Send a `POST /product/add` request to your local server:
+
+        <CodeGroup>
+          ```bash curl
+          curl --location --request POST 'http://localhost:8000/product/add' \
+            --header 'Content-Type: application/json' \
+            --data-raw '{
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "I like eating strawberries"
+                }
+              ],
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"]
+            }'
+          ```
+
+          ```python Python
+          import requests
+          import json
+
+          data = {
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+              "messages": [
+                  {
+                      "role": "user",
+                      "content": "I like eating strawberries"
+                  }
+              ],
+              "async_mode": "sync"
+          }
+          headers = {"Content-Type": "application/json"}
+          url = "http://localhost:8000/product/add"
+
+          res = requests.post(url=url, headers=headers, data=json.dumps(data))
+          print(f"result: {res.json()}")
+          ```
+        </CodeGroup>
+
+        A successful response:
+
+        ```json
+        {
+          "code": 200,
+          "message": "Memory created successfully",
+          "data": null
+        }
+        ```
+      </Step>
+
+      <Step title="Search your memory">
+        Query the memory you just stored:
+
+        <CodeGroup>
+          ```bash curl
+          curl --location --request POST 'http://localhost:8000/product/search' \
+            --header 'Content-Type: application/json' \
+            --data-raw '{
+              "query": "What do I like to eat",
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+              "top_k": 20
+            }'
+          ```
+
+          ```python Python
+          import requests
+          import json
+
+          data = {
+              "query": "What do I like to eat",
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"]
+          }
+          headers = {"Content-Type": "application/json"}
+          url = "http://localhost:8000/product/search"
+
+          res = requests.post(url=url, headers=headers, data=json.dumps(data))
+          print(f"result: {res.json()}")
+          ```
+        </CodeGroup>
+
+        The response returns ranked memories with metadata:
+
+        ```json
+        {
+          "code": 200,
+          "message": "Search completed successfully",
+          "data": {
+            "text_mem": [
+              {
+                "cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+                "memories": [
+                  {
+                    "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+                    "memory": "[user opinion] User likes strawberries.",
+                    "metadata": {
+                      "type": "fact",
+                      "key": "User's preference for strawberries",
+                      "confidence": 0.99,
+                      "tags": ["preference", "strawberries"],
+                      "relativity": 0.63
+                    },
+                    "ref_id": "[2f40be8f]"
+                  }
+                ]
+              }
+            ],
+            "act_mem": [],
+            "para_mem": []
+          }
+        }
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Python SDK: MOS.simple()
+
+If you prefer the Python SDK over direct REST calls, `MOS.simple()` is the fastest way to get started. It reads your credentials from environment variables and auto-configures a default MemCube.
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+export MOS_TEXT_MEM_TYPE="general_text"
+```
+
+```python
+from memos.mem_os.main import MOS
+
+# Create a MOS instance — reads OPENAI_API_KEY from the environment
+memory = MOS.simple()
+
+# Add a memory
+memory.add_memory("I like strawberry")
+
+# Chat with memory-augmented context
+response = memory.chat("What do I like?")
+print(response)
+```
+
+<Note>
+  `MOS.simple()` requires `OPENAI_API_KEY` to be set in your environment. It uses `general_text` memory by default. For more control over your LLM provider and memory backend, see the [LLM providers guide](/integrations/llm-providers).
+</Note>
+
+## What's next
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Set up a self-hosted MemOS server with Docker, pip, or from source.
+  </Card>
+  <Card title="API reference: add memory" icon="plus" href="/api/add">
+    Full reference for the `POST /product/add` endpoint — all fields and options.
+  </Card>
+  <Card title="API reference: search" icon="magnifying-glass" href="/api/search">
+    Full reference for `POST /product/search` — filters, top_k, and response format.
+  </Card>
+  <Card title="Core concepts" icon="brain" href="/concepts/overview">
+    Understand how MemCubes, memory types, and the MemScheduler work together.
+  </Card>
+</CardGroup>

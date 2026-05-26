@@ -1,0 +1,102 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "luma",
+  "name": "Openmem",
+  "colors": {
+    "primary": "#4b56ef",
+    "light": "#ffffff"
+  },
+  "favicon": "https://media.brand.dev/8490b5b8-c4e4-45ad-9328-9e2af47112a5.svg",
+  "logo": {
+    "light": "https://media.brand.dev/24459766-2f5c-41a4-9723-1d2285608d23.svg",
+    "dark": "https://media.brand.dev/24459766-2f5c-41a4-9723-1d2285608d23.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/MemTensor/MemOS"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/overview",
+              "concepts/mem-cube",
+              "concepts/memory-types",
+              "concepts/mem-scheduler"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/add-search-memory",
+              "guides/chat-with-memory",
+              "guides/feedback-correction",
+              "guides/multi-cube",
+              "guides/mcp-integration"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/openclaw-plugin",
+              "integrations/hermes-plugin",
+              "integrations/llm-providers"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/memory-backends",
+              "configuration/deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Memory API",
+            "pages": [
+              "api/add",
+              "api/search",
+              "api/get-memory",
+              "api/delete-memory",
+              "api/feedback",
+              "api/suggestions"
+            ]
+          },
+          {
+            "group": "Chat API",
+            "pages": [
+              "api/chat-complete",
+              "api/chat-stream"
+            ]
+          },
+          {
+            "group": "Scheduler API",
+            "pages": [
+              "api/scheduler-status",
+              "api/scheduler-wait"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

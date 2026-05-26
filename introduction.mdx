@@ -1,0 +1,64 @@
+---
+title: "What is MemOS? Memory OS for AI Agents"
+description: "MemOS is a Memory Operating System that gives LLMs and AI agents persistent, searchable memory — unified store, retrieve, and manage in one API."
+---
+
+MemOS is a Memory Operating System for LLMs and AI agents. Where most AI applications lose context between sessions, MemOS gives your agents a persistent memory layer they can write to, search, and manage over time. You interact with it through a single REST API or Python SDK — the same interface whether you're running in the cloud or self-hosting on your own infrastructure.
+
+## Why MemOS?
+
+Modern LLMs are powerful but stateless. They rely on parametric memory (model weights) that is expensive to update and impossible to inspect at runtime. Standard RAG pipelines retrieve external facts, but lack the lifecycle management, personalization, and cross-agent sharing that production agents require.
+
+MemOS treats memory as a first-class, orchestrated resource — not a black-box embedding store. Every memory is structured, versioned, and auditable. Your agents can accumulate knowledge, correct past memories with natural language, and share memory across sessions or agents using composable containers called **MemCubes**.
+
+## What you can do with MemOS
+
+- **Add memory** from conversation messages — MemOS extracts and stores structured facts automatically
+- **Search memory** semantically to retrieve relevant context before generating a response
+- **Correct and refine** memories over time with natural language feedback
+- **Share memory** across multiple agents or isolate it per user, session, or project
+- **Save tokens** — relevant retrieval means you inject only what matters
+
+Benchmarks show MemOS delivers **+43.70% accuracy** versus OpenAI Memory and saves **35.24% memory tokens** in production workloads.
+
+## Three memory types
+
+MemOS unifies three distinct forms of memory in a single system:
+
+| Type | What it stores | Typical use |
+| --- | --- | --- |
+| **Textual** | Facts, preferences, knowledge, conversation history | Semantic search, personalization, explainable recall |
+| **Activation** | KV cache states from inference | Fast multi-turn chat, low-latency generation |
+| **Parametric** | LoRA adapter weights | Long-term skill retention, domain specialization |
+
+Over time, hot textual memories can be promoted to KV cache for rapid injection, and stable knowledge can be distilled into parametric weights — creating a living memory loop that evolves with your agent.
+
+## MemCubes
+
+A **MemCube** is the container that holds memory for a user, session, or agent. Each MemCube is independently loadable, saveable, and addressable by ID. You can give different agents access to shared MemCubes, or keep them fully isolated — all through the same API.
+
+## Deployment options
+
+MemOS is available in two deployment modes:
+
+- **Cloud (hosted)**: Sign up at [memos-dashboard.openmem.net](https://memos-dashboard.openmem.net), get an API key, and start calling the API immediately — no infrastructure to manage.
+- **Self-hosted**: Run MemOS on your own infrastructure using Docker or pip. Full control over data, models, and configuration.
+
+The REST API surface is identical in both modes.
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Make your first memory API call in under 5 minutes — cloud or self-hosted.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install MemOS via Docker, pip, or from source with full configuration steps.
+  </Card>
+  <Card title="Core concepts" icon="brain" href="/concepts/overview">
+    Understand MemCubes, memory types, lifecycle, and the MemScheduler.
+  </Card>
+  <Card title="API reference" icon="code" href="/api/add">
+    Explore the full REST API — add, search, chat, feedback, and more.
+  </Card>
+</CardGroup>

@@ -1,0 +1,58 @@
+---
+title: "MemOS: Memory OS for LLMs and AI Agents"
+description: "MemOS gives your AI agents persistent, searchable memory. Add, retrieve, and manage long-term memory with a unified API — 35% token savings included."
+---
+
+MemOS is a Memory Operating System that gives LLMs and AI agents persistent, context-aware memory. With a single REST API or Python SDK, you can add memories from conversations, search them semantically, and feed them back into your agent — enabling personalized, stateful AI interactions that improve over time.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Make your first memory API call in under 5 minutes — cloud or self-hosted.
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install MemOS via Docker, pip, or from source.
+  </Card>
+  <Card title="Core Concepts" icon="brain" href="/concepts/overview">
+    Understand MemCubes, memory types, and the MemScheduler.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/add">
+    Explore the full REST API — add, search, chat, and more.
+  </Card>
+</CardGroup>
+
+## What you can build
+
+MemOS gives your AI agents the memory layer they need for production use cases:
+
+<CardGroup cols={2}>
+  <Card title="Personalized AI assistants" icon="user">
+    Remember user preferences, habits, and context across sessions — no more repeating yourself.
+  </Card>
+  <Card title="Long-term context for agents" icon="timeline">
+    Retrieve relevant past knowledge automatically during every conversation or task.
+  </Card>
+  <Card title="Multi-agent memory sharing" icon="share-nodes">
+    Share and isolate memory across multiple agents using composable MemCubes.
+  </Card>
+  <Card title="Token-efficient RAG" icon="bolt">
+    35.24% fewer tokens through smart retrieval — only inject what's relevant.
+  </Card>
+</CardGroup>
+
+## Get started in 3 steps
+
+<Steps>
+  <Step title="Get access">
+    Sign up at [memos-dashboard.openmem.net](https://memos-dashboard.openmem.net) for cloud access, or [install self-hosted](/installation) via Docker or pip.
+  </Step>
+  <Step title="Add your first memory">
+    Send a `POST /product/add` request with a conversation message. MemOS extracts and stores the memory automatically.
+  </Step>
+  <Step title="Search and use memory">
+    Query with `POST /product/search` to retrieve relevant memories — feed them into your LLM for context-aware responses.
+  </Step>
+</Steps>
+
+<Note>
+  MemOS supports both a **Cloud API** (hosted, no infrastructure to manage) and **self-hosted** deployment on your own infrastructure. The API surface is identical either way.
+</Note>

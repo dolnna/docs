@@ -1,0 +1,180 @@
+---
+title: "Connect AI Assistants to MemOS via MCP"
+description: "Run the MemOS MCP server to expose memory tools to Claude Desktop, Cursor, and other MCP-compatible AI assistants — no custom integration code required."
+---
+
+The Model Context Protocol (MCP) is a standard that lets AI assistants call external tools — file systems, databases, APIs — without custom integration code on your side. MemOS ships a built-in MCP server that exposes memory tools over stdio or HTTP. Once you connect an MCP client like Claude Desktop or Cursor to MemOS, the assistant can add, search, and retrieve memories as part of any conversation.
+
+## Available MCP tools
+
+The MemOS MCP server exposes the following tools to connected clients:
+
+| Tool | Description |
+| --- | --- |
+| `add_memory` | Store text, documents, or conversation messages as memories in a specified cube. |
+| `search_memories` | Semantic search across one or more cubes by query string. |
+| `get_memory` | Retrieve a specific memory by its ID. |
+| `delete_memory` | Remove a specific memory from a cube. |
+| `delete_all_memories` | Clear all memories from a cube. |
+| `chat` | Ask MemOS a question with full memory-augmented context. |
+| `create_user` | Create a new user in the MOS system. |
+| `create_cube` | Create a new MemCube for a user. |
+| `register_cube` | Register an existing cube from disk. |
+| `share_cube` | Grant another user access to a cube. |
+
+## Prerequisites
+
+- MemOS installed (see [Installation](/installation))
+- Environment variables configured (see below)
+- An MCP-compatible client: Claude Desktop, Cursor, or another MCP-aware tool
+
+## Configure environment variables
+
+Create a `.env` file in your MemOS project root with the following values before starting the server:
+
+```bash
+# LLM provider
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_API_BASE=https://api.openai.com/v1
+
+# Memory backend
+MOS_TEXT_MEM_TYPE=tree_text
+
+# Neo4j (required for tree_text memory type)
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_neo4j_password
+```
+
+<Note>
+  If you are using `general_text` memory type instead of `tree_text`, you do not need Neo4j. Set `MOS_TEXT_MEM_TYPE=general_text` and configure a Qdrant vector database instead.
+</Note>
+
+## Start the MCP server
+
+MemOS supports three transport methods. Choose the one that matches your client.
+
+<Steps>
+  <Step title="Navigate to your MemOS directory">
+
+    ```bash
+    cd /path/to/MemOS
+    ```
+
+  </Step>
+  <Step title="Start the server with your preferred transport">
+
+    <Tabs>
+      <Tab title="stdio (recommended for desktop clients)">
+
+        ```bash
+        python src/memos/api/mcp_serve.py
+        ```
+
+        stdio transport is the default and works with Claude Desktop, Cursor, and most local MCP clients. The process communicates over standard input/output — the client manages the process lifecycle.
+
+      </Tab>
+      <Tab title="HTTP">
+
+        ```bash
+        python src/memos/api/mcp_serve.py --transport http --host localhost --port 8000
+        ```
+
+        HTTP transport is suited for web applications and remote clients. The server listens on the specified host and port.
+
+      </Tab>
+      <Tab title="SSE (deprecated)">
+
+        ```bash
+        python src/memos/api/mcp_serve.py --transport sse --host localhost --port 8000
+        ```
+
+        Server-Sent Events transport is still supported but deprecated. Prefer `http` for new integrations.
+
+      </Tab>
+    </Tabs>
+
+  </Step>
+</Steps>
+
+## Connect Claude Desktop
+
+Add the following configuration to your Claude Desktop MCP config file. On macOS the file is located at `~/Library/Application Support/Claude/claude_desktop_config.json`; on Windows it is `%APPDATA%\Claude\claude_desktop_config.json`.
+
+```json
+{
+  "mcpServers": {
+    "memos": {
+      "command": "/path/to/your/conda/envs/memos/bin/python",
+      "args": [
+        "-m", "memos.api.mcp_serve",
+        "--transport", "stdio"
+      ],
+      "env": {
+        "OPENAI_API_KEY": "sk-your-openai-key-here",
+        "OPENAI_API_BASE": "https://api.openai.com/v1",
+        "MOS_TEXT_MEM_TYPE": "tree_text",
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "your-neo4j-password"
+      }
+    }
+  }
+}
+```
+
+Replace `/path/to/your/conda/envs/memos/bin/python` with the path to the Python interpreter in your MemOS environment. If you installed MemOS with pip into a virtual environment, use that environment's interpreter path instead.
+
+After saving the config, restart Claude Desktop. You should see MemOS listed in the tools panel.
+
+## Connect Cursor
+
+Cursor uses the same MCP configuration format. Open your Cursor settings, navigate to **MCP Servers**, and add the same JSON block shown above for Claude Desktop.
+
+## Connect any MCP client
+
+For other MCP-compatible clients, use this template. Point `command` at your Python interpreter and `args` at the `mcp_serve` module:
+
+```json
+{
+  "mcpServers": {
+    "memos-fastmcp": {
+      "command": "python",
+      "args": [
+        "-m", "memos.api.mcp_serve",
+        "--transport", "stdio"
+      ],
+      "env": {
+        "OPENAI_API_KEY": "sk-your-key",
+        "OPENAI_API_BASE": "https://api.openai.com/v1",
+        "MOS_TEXT_MEM_TYPE": "tree_text",
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "your-password"
+      }
+    }
+  }
+}
+```
+
+<Tip>
+  If you installed MemOS system-wide with `pip install memos`, you can omit the `cwd` field — Python will find the `memos` package from its install location. If you cloned the repo and are running from source, add `"cwd": "/path/to/MemOS/src"` to ensure the module is on the path.
+</Tip>
+
+## Verify the connection
+
+Once your client is configured, ask the assistant to use MemOS memory directly in conversation:
+
+> "Add a memory that my team's weekly sync is every Tuesday at 2pm."
+
+The assistant will call the `add_memory` tool and confirm the memory was stored. You can then verify retrieval:
+
+> "What do I have scheduled on Tuesdays?"
+
+The assistant calls `search_memories` with that query and returns the result grounded in the memory you just added.
+
+## Next steps
+
+- [Add and search memory](/guides/add-search-memory) — understand the underlying add and search API
+- [Manage multiple memory spaces](/guides/multi-cube) — use separate cubes for different projects or agents
+- [Chat with memory-augmented responses](/guides/chat-with-memory) — use the REST chat endpoint directly for programmatic access

@@ -1,0 +1,347 @@
+---
+title: 'Get memories — GET & POST /product/get_memory'
+description: 'Fetch a memory by ID, list memories from a MemCube with optional filters and pagination, or retrieve all memories of a given type for a user.'
+---
+
+MemOS provides three endpoints for reading stored memories. Use the GET endpoint when you have a specific memory ID and want its full record. Use the POST endpoint when you want to list all memories in a MemCube, optionally paginated or filtered. Use the `get_all` endpoint when you need a full snapshot of a user's memories of a specific type — for example to populate a UI or export data.
+
+---
+
+## GET /product/get_memory/{memory_id}
+
+Fetch a single memory by its unique ID.
+
+### Path parameters
+
+<ParamField path="memory_id" type="string" required>
+  UUID of the memory to retrieve.
+</ParamField>
+
+### Response
+
+<ResponseField name="code" type="number">
+  `200` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Status message.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Memory data. See the [memory object](#memory-object) reference below.
+</ResponseField>
+
+### Example
+
+<CodeGroup>
+
+```bash cURL
+curl http://localhost:8000/product/get_memory/2f40be8f-736c-4a5f-aada-9489037769e0
+```
+
+```python Python
+import requests
+
+memory_id = "2f40be8f-736c-4a5f-aada-9489037769e0"
+response = requests.get(
+    f"http://localhost:8000/product/get_memory/{memory_id}"
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory retrieved successfully",
+  "data": {
+    "memory_detail_list": [
+      {
+        "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+        "memory": "[user opinion] User likes strawberries.",
+        "metadata": {
+          "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+          "type": "fact",
+          "confidence": 0.99,
+          "tags": ["preference", "strawberries"],
+          "created_at": "2025-09-18T08:23:44.625511+00:00",
+          "updated_at": "2025-09-18T08:23:44.625479+00:00",
+          "status": "activated",
+          "memory_type": "UserMemory"
+        }
+      }
+    ],
+    "preference_detail_list": null
+  }
+}
+```
+
+---
+
+## POST /product/get_memory
+
+Retrieve memories from a MemCube, with optional pagination and metadata filtering.
+
+### Request body
+
+<ParamField body="mem_cube_id" type="string" required>
+  ID of the MemCube to read from.
+</ParamField>
+
+<ParamField body="user_id" type="string">
+  Filter results to memories belonging to this user.
+</ParamField>
+
+<ParamField body="include_preference" type="boolean" default="true">
+  When `true`, preference memories are included in `preference_detail_list`.
+</ParamField>
+
+<ParamField body="include_tool_memory" type="boolean" default="true">
+  When `true`, tool-use memories are included in the response.
+</ParamField>
+
+<ParamField body="include_skill_memory" type="boolean" default="true">
+  When `true`, skill memories are included in the response.
+</ParamField>
+
+<ParamField body="page" type="number">
+  Page number (1-indexed). When omitted, all records are returned without pagination.
+</ParamField>
+
+<ParamField body="page_size" type="number">
+  Number of memories per page. When omitted, all records are returned.
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Structured metadata filter. Supports `and` / `or` conditions on any metadata field.
+
+  <Expandable title="filter example">
+    ```json
+    {
+      "and": [
+        { "tags": "travel" },
+        { "created_at": { "gt": "2025-01-01" } }
+      ]
+    }
+    ```
+  </Expandable>
+</ParamField>
+
+### Example
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/get_memory \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "page": 1,
+    "page_size": 20
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/get_memory",
+    json={
+        "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "page": 1,
+        "page_size": 20,
+    },
+)
+memories = response.json()["data"]["memory_detail_list"]
+print(f"Retrieved {len(memories)} memories")
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory retrieved successfully",
+  "data": {
+    "memory_detail_list": [
+      {
+        "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+        "memory": "[user opinion] User likes strawberries.",
+        "metadata": {
+          "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+          "type": "fact",
+          "confidence": 0.99,
+          "tags": ["preference", "strawberries"],
+          "created_at": "2025-09-18T08:23:44.625511+00:00",
+          "updated_at": "2025-09-18T08:23:44.625479+00:00",
+          "status": "activated",
+          "memory_type": "UserMemory"
+        }
+      }
+    ],
+    "preference_detail_list": null
+  }
+}
+```
+
+---
+
+## POST /product/get_all
+
+Get all memories of a specific type for a user. When `search_query` is provided, returns a relevant subgraph instead of all records.
+
+### Request body
+
+<ParamField body="user_id" type="string" required>
+  The user whose memories you are retrieving.
+</ParamField>
+
+<ParamField body="memory_type" type="string" required>
+  Type of memory to retrieve. One of:
+  - `"text_mem"` — factual and conversational memories
+  - `"act_mem"` — action and tool-use memories
+  - `"para_mem"` — parametric / preference memories
+</ParamField>
+
+<ParamField body="mem_cube_ids" type="string[]">
+  List of MemCube IDs to read from. When omitted, defaults to the cube identified by `user_id`.
+</ParamField>
+
+<ParamField body="search_query" type="string">
+  Optional query string. When provided, returns a subgraph of memories semantically related to this query rather than all memories.
+</ParamField>
+
+<ParamField body="search_type" type="string" default="fulltext">
+  Search type used when `search_query` is provided. `"fulltext"` or `"embedding"`.
+</ParamField>
+
+### Example
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/get_all \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "memory_type": "text_mem",
+    "mem_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"]
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/get_all",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "memory_type": "text_mem",
+        "mem_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory retrieved successfully",
+  "data": [
+    {
+      "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+      "memory": "[user opinion] User likes strawberries.",
+      "metadata": {
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "type": "fact",
+        "confidence": 0.99,
+        "tags": ["preference", "strawberries"],
+        "created_at": "2025-09-18T08:23:44.625511+00:00",
+        "status": "activated",
+        "memory_type": "UserMemory"
+      }
+    },
+    {
+      "id": "7c91aa32-1e2b-4d98-b4e7-0001234abcde",
+      "memory": "User has a meeting in Shanghai on Friday at 3pm.",
+      "metadata": {
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "type": "fact",
+        "confidence": 0.97,
+        "tags": ["meeting", "schedule"],
+        "created_at": "2025-09-19T10:15:00.000000+00:00",
+        "status": "activated",
+        "memory_type": "UserMemory"
+      }
+    }
+  ]
+}
+```
+
+---
+
+## Memory object reference
+
+<ResponseField name="id" type="string">
+  Unique memory identifier (UUID).
+</ResponseField>
+
+<ResponseField name="memory" type="string">
+  The extracted memory text, typically prefixed with a semantic label such as `[user opinion]` or `[fact]`.
+</ResponseField>
+
+<ResponseField name="metadata" type="object">
+  <Expandable title="metadata fields">
+    <ResponseField name="metadata.user_id" type="string">
+      User this memory belongs to.
+    </ResponseField>
+    <ResponseField name="metadata.type" type="string">
+      Semantic type, for example `"fact"` or `"preference"`.
+    </ResponseField>
+    <ResponseField name="metadata.memory_type" type="string">
+      Internal classification, for example `"UserMemory"` or `"WorkingMemory"`.
+    </ResponseField>
+    <ResponseField name="metadata.confidence" type="number">
+      Extraction confidence score between `0` and `1`.
+    </ResponseField>
+    <ResponseField name="metadata.tags" type="string[]">
+      Tags attached to the memory.
+    </ResponseField>
+    <ResponseField name="metadata.status" type="string">
+      Activation status: `"activated"` or `"deactivated"`.
+    </ResponseField>
+    <ResponseField name="metadata.key" type="string">
+      Short descriptive label for the memory.
+    </ResponseField>
+    <ResponseField name="metadata.background" type="string">
+      Context sentence generated at extraction time.
+    </ResponseField>
+    <ResponseField name="metadata.created_at" type="string">
+      ISO 8601 creation timestamp.
+    </ResponseField>
+    <ResponseField name="metadata.updated_at" type="string">
+      ISO 8601 last-updated timestamp.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Error responses
+
+| Code | Description |
+|------|-------------|
+| `404` | No memory found for the given ID. |
+| `422` | Validation error — missing or invalid parameters. |
+| `500` | Internal server error. |

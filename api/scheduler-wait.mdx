@@ -1,0 +1,298 @@
+---
+title: 'Scheduler wait — POST /product/scheduler/wait'
+description: 'Block until the scheduler finishes all tasks for a user, or stream live progress events via SSE until the queue is idle or a timeout is reached.'
+---
+
+After an async memory operation such as `POST /product/add`, you sometimes need to know when all background processing has finished before issuing a search or running an evaluation. The wait endpoints give you two ways to do that: a blocking POST that returns only when the scheduler is idle, and a streaming GET that emits live progress events as an SSE stream. The blocking wait is the simplest choice for scripts, tests, and sequential pipelines. The streaming variant is better suited to progress UIs where you want to display a live indicator while the scheduler works.
+
+<Warning>
+  Both endpoints poll the scheduler in a tight loop and hold an open connection until idle or timeout. For production workloads with many concurrent users, prefer polling [GET /product/scheduler/status](/api/scheduler-status) on your own schedule to avoid holding long-lived server connections.
+</Warning>
+
+## Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/product/scheduler/wait` | Block until idle, then return a summary |
+| `GET` | `/product/scheduler/wait/stream` | Stream SSE progress events until idle |
+
+---
+
+## POST /product/scheduler/wait
+
+Blocks the HTTP connection and polls the scheduler until either all of the user's tasks reach a terminal state (`completed`, `failed`, or `cancelled`) or the timeout expires.
+
+### Query parameters
+
+<ParamField query="user_name" type="string" required>
+  The user name (or user ID) to wait on. Must match the identifier used when tasks were submitted.
+</ParamField>
+
+<ParamField query="timeout_seconds" type="number" default="120">
+  Maximum number of seconds to wait before returning a timeout result. The server returns a response either when the scheduler becomes idle or when this limit is reached, whichever comes first.
+</ParamField>
+
+<ParamField query="poll_interval" type="number" default="0.5">
+  How often, in seconds, the server checks the task status internally. Lower values reduce latency but increase server-side CPU usage. Values below `0.1` are not recommended.
+</ParamField>
+
+### Response
+
+<ResponseField name="message" type="string" required>
+  `"idle"` when all tasks finished before the timeout. `"timeout"` when the wait period elapsed with tasks still active.
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  Summary of the wait operation.
+
+  <Expandable title="data object">
+    <ResponseField name="data.running_tasks" type="integer" required>
+      Number of tasks still in `"waiting"` or `"in_progress"` state at the time the response was sent. `0` when the scheduler reached idle.
+    </ResponseField>
+    <ResponseField name="data.waited_seconds" type="number" required>
+      Total elapsed time in seconds from when the request was received to when the response was sent.
+    </ResponseField>
+    <ResponseField name="data.timed_out" type="boolean" required>
+      `true` when the response was triggered by timeout rather than idle state.
+    </ResponseField>
+    <ResponseField name="data.user_name" type="string" required>
+      The user name the wait was scoped to.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Examples
+
+#### Wait for an async add to complete before searching
+
+```python Python
+import requests
+
+BASE_URL = "http://localhost:8000"
+USER_ID = "8736b16e-1d20-4163-980b-a5063c3facdc"
+CUBE_ID = "b32d0977-435d-4828-a86f-4f47f8b55bca"
+
+# Step 1: submit an async memory add
+add_resp = requests.post(
+    f"{BASE_URL}/product/add",
+    json={
+        "user_id": USER_ID,
+        "writable_cube_ids": [CUBE_ID],
+        "messages": [
+            {"role": "user", "content": "I prefer aisle seats when flying."},
+            {"role": "assistant", "content": "Noted, I will remember your seating preference."},
+        ],
+        "async_mode": "async",
+    },
+)
+add_resp.raise_for_status()
+print("Add enqueued:", add_resp.json()["data"]["task_id"])
+
+# Step 2: wait until the scheduler processes all tasks for this user
+wait_resp = requests.post(
+    f"{BASE_URL}/product/scheduler/wait",
+    params={
+        "user_name": USER_ID,
+        "timeout_seconds": 60,
+        "poll_interval": 0.5,
+    },
+)
+wait_resp.raise_for_status()
+result = wait_resp.json()
+print(f"Scheduler status: {result['message']} (waited {result['data']['waited_seconds']}s)")
+
+# Step 3: now search — memory is guaranteed to be written
+search_resp = requests.post(
+    f"{BASE_URL}/product/search",
+    json={
+        "user_id": USER_ID,
+        "query": "What are my flight preferences?",
+        "readable_cube_ids": [CUBE_ID],
+    },
+)
+print(search_resp.json())
+```
+
+<CodeGroup>
+
+```bash cURL (idle)
+curl --request POST \
+  "http://localhost:8000/product/scheduler/wait?user_name=8736b16e-1d20-4163-980b-a5063c3facdc&timeout_seconds=60"
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/scheduler/wait",
+    params={
+        "user_name": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "timeout_seconds": 60,
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**Response — idle**
+
+```json 200
+{
+  "message": "idle",
+  "data": {
+    "running_tasks": 0,
+    "waited_seconds": 1.243,
+    "timed_out": false,
+    "user_name": "8736b16e-1d20-4163-980b-a5063c3facdc"
+  }
+}
+```
+
+**Response — timeout**
+
+```json 200
+{
+  "message": "timeout",
+  "data": {
+    "running_tasks": 2,
+    "waited_seconds": 120.001,
+    "timed_out": true,
+    "user_name": "8736b16e-1d20-4163-980b-a5063c3facdc"
+  }
+}
+```
+
+---
+
+## GET /product/scheduler/wait/stream
+
+Streams live scheduler progress as Server-Sent Events until the scheduler becomes idle for the specified user or the timeout expires. Each event carries the current active task count and elapsed time so you can drive a progress indicator in your UI.
+
+### Query parameters
+
+<ParamField query="user_name" type="string" required>
+  The user name (or user ID) to monitor.
+</ParamField>
+
+<ParamField query="timeout_seconds" type="number" default="120">
+  Maximum stream duration in seconds. A final event with `"status": "timeout"` is emitted before the stream closes if this limit is reached.
+</ParamField>
+
+<ParamField query="poll_interval" type="number" default="0.5">
+  Interval in seconds between status checks on the server side.
+</ParamField>
+
+### SSE event format
+
+Each event is a `data:` line followed by a JSON object, separated from the next event by a blank line.
+
+<ResponseField name="user_name" type="string" required>
+  The user name this event is scoped to.
+</ResponseField>
+
+<ResponseField name="active_tasks" type="integer" required>
+  Number of tasks currently in `"waiting"` or `"in_progress"` state. `0` when the scheduler is idle.
+</ResponseField>
+
+<ResponseField name="elapsed_seconds" type="number" required>
+  Seconds elapsed since the stream started.
+</ResponseField>
+
+<ResponseField name="status" type="string" required>
+  `"running"` while tasks are active. `"idle"` when all tasks have finished. `"timeout"` when the timeout was reached. `"error"` when an internal error occurred.
+</ResponseField>
+
+<ResponseField name="timed_out" type="boolean">
+  Present only on the final `"timeout"` event. `true` when the stream ended due to timeout.
+</ResponseField>
+
+<ResponseField name="instance_id" type="string">
+  Server instance identifier, useful when debugging multi-instance deployments.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+
+```bash cURL
+curl --no-buffer \
+  "http://localhost:8000/product/scheduler/wait/stream?user_name=8736b16e-1d20-4163-980b-a5063c3facdc&timeout_seconds=60"
+```
+
+```python Python
+import json
+import requests
+
+response = requests.get(
+    "http://localhost:8000/product/scheduler/wait/stream",
+    params={
+        "user_name": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "timeout_seconds": 60,
+    },
+    stream=True,
+)
+
+for line in response.iter_lines():
+    if not line:
+        continue
+    text = line.decode("utf-8")
+    if not text.startswith("data: "):
+        continue
+    event = json.loads(text[len("data: "):])
+    print(
+        f"status={event['status']} "
+        f"active={event['active_tasks']} "
+        f"elapsed={event['elapsed_seconds']:.1f}s"
+    )
+    if event["status"] in ("idle", "timeout", "error"):
+        break
+```
+
+</CodeGroup>
+
+**Sample SSE output — tasks completing**
+
+```
+data: {"user_name": "8736b16e-1d20-4163-980b-a5063c3facdc", "active_tasks": 3, "elapsed_seconds": 0.0, "status": "running", "instance_id": "host-1234:5678:9012"}
+
+data: {"user_name": "8736b16e-1d20-4163-980b-a5063c3facdc", "active_tasks": 2, "elapsed_seconds": 0.5, "status": "running", "instance_id": "host-1234:5678:9012"}
+
+data: {"user_name": "8736b16e-1d20-4163-980b-a5063c3facdc", "active_tasks": 1, "elapsed_seconds": 1.0, "status": "running", "instance_id": "host-1234:5678:9012"}
+
+data: {"user_name": "8736b16e-1d20-4163-980b-a5063c3facdc", "active_tasks": 0, "elapsed_seconds": 1.5, "status": "idle", "instance_id": "host-1234:5678:9012"}
+```
+
+**Sample SSE output — timeout**
+
+```
+data: {"user_name": "8736b16e-1d20-4163-980b-a5063c3facdc", "active_tasks": 2, "elapsed_seconds": 120.0, "status": "timeout", "timed_out": true, "instance_id": "host-1234:5678:9012"}
+```
+
+---
+
+## Error responses
+
+| Code | Description |
+|------|-------------|
+| `422` | Validation error — a required query parameter is missing or the wrong type. |
+| `500` | Internal error while polling task status. For the stream endpoint, errors are delivered as a `{"status": "error", ...}` SSE event rather than an HTTP status code. |
+
+```json 422
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["query", "user_name"],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```
+
+An in-stream error looks like this:
+
+```
+data: {"status": "error", "detail": "stream_failed", "exception": "Redis connection lost", "user_name": "8736b16e-1d20-4163-980b-a5063c3facdc"}
+```

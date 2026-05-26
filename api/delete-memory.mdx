@@ -1,0 +1,246 @@
+---
+title: 'Delete memories — POST /product/delete_memory'
+description: 'Delete one or more memories by ID, by session, or by filter from a MemCube. Deletions are soft-deleted and version history is preserved.'
+---
+
+The Delete Memory endpoint removes memories from a MemCube. You can delete by explicit memory ID list, by session, or using a metadata filter. Deletions in MemOS are soft-deletes: the memory nodes are marked as deleted and excluded from search results, but their version history is preserved and can be recovered if needed. Obtain memory IDs from the [Search](/api/search) or [Get Memory](/api/get-memory) endpoints before calling this endpoint.
+
+## Endpoint
+
+```
+POST /product/delete_memory
+```
+
+## Request body
+
+<ParamField body="writable_cube_ids" type="string[]">
+  List of MemCube IDs to delete from. Required when deleting by `memory_ids` without a `user_id` scope. You must have write access to each listed cube.
+</ParamField>
+
+<ParamField body="memory_ids" type="string[]">
+  List of memory UUIDs to delete. You can retrieve these IDs from search or get-memory responses.
+</ParamField>
+
+<ParamField body="user_id" type="string">
+  When provided, deletes all memories belonging to this user within the target MemCubes.
+</ParamField>
+
+<ParamField body="session_id" type="string">
+  When provided, deletes all memories associated with this session.
+</ParamField>
+
+<ParamField body="file_ids" type="string[]">
+  List of file IDs whose associated memories should be deleted (for document-sourced memories).
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Structured metadata filter. All memories matching the filter are deleted.
+
+  <Expandable title="filter example">
+    ```json
+    {
+      "and": [
+        { "tags": "travel" },
+        { "created_at": { "lt": "2025-01-01" } }
+      ]
+    }
+    ```
+  </Expandable>
+</ParamField>
+
+<Note>
+  You must supply at least one of `memory_ids`, `user_id`, `session_id`, or `filter`. Providing none will result in a validation error.
+</Note>
+
+## Response
+
+<ResponseField name="code" type="number" required>
+  `200` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable status message.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  <Expandable title="data object">
+    <ResponseField name="data.success" type="boolean">
+      `true` when the deletion was applied successfully.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Delete specific memories by ID
+
+First, retrieve memory IDs using the Search endpoint:
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/search \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "query": "meeting location",
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "top_k": 5
+  }'
+```
+
+Then delete by the returned IDs:
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/delete_memory \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "memory_ids": [
+      "2f40be8f-736c-4a5f-aada-9489037769e0",
+      "7c91aa32-1e2b-4d98-b4e7-0001234abcde"
+    ]
+  }'
+```
+
+```python Python
+import requests
+
+# Step 1: search for the memories you want to remove
+search_resp = requests.post(
+    "http://localhost:8000/product/search",
+    json={
+        "query": "meeting location",
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "top_k": 5,
+    },
+)
+ids_to_delete = [
+    m["id"]
+    for cube in search_resp.json()["data"]["text_mem"]
+    for m in cube["memories"]
+]
+
+# Step 2: delete by ID
+delete_resp = requests.post(
+    "http://localhost:8000/product/delete_memory",
+    json={
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "memory_ids": ids_to_delete,
+    },
+)
+print(delete_resp.json())
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory deleted successfully",
+  "data": {
+    "success": true
+  }
+}
+```
+
+### Delete all memories for a session
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/delete_memory \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "session_id": "session-abc-123"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/delete_memory",
+    json={
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "session_id": "session-abc-123",
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+### Delete by metadata filter
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/delete_memory \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "filter": {
+      "and": [
+        { "tags": "outdated" }
+      ]
+    }
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/delete_memory",
+    json={
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "filter": {
+            "and": [
+                {"tags": "outdated"}
+            ]
+        },
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+## Soft-delete behavior
+
+<Info>
+  MemOS does not permanently erase deleted memories immediately. Each deletion creates a version record. This means:
+  - Deleted memories no longer appear in search results or memory listings.
+  - The underlying data can be recovered programmatically if needed.
+  - Audit trails are preserved for compliance use cases.
+</Info>
+
+## Error responses
+
+| Code | Description |
+|------|-------------|
+| `400` | No deletion criteria provided or malformed request. |
+| `422` | Validation error — one or more fields failed type checks. |
+| `500` | Internal error during deletion. |
+
+```json 422
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["body", "writable_cube_ids"],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```

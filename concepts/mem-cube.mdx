@@ -1,0 +1,170 @@
+---
+title: "MemCube: Memory Containers for Users and Projects"
+description: "Understand how MemCubes isolate and organize memory per user or project, and how to use writable and readable cube IDs in your API requests."
+---
+
+A MemCube is a self-contained memory container — like a portable cartridge that holds all the memories for a specific user, session, or project. When you add memories for a user, you write into their MemCube. When you search, you read from one or more MemCubes. This isolation model lets you manage memory across many users independently, share memory between agents when needed, and keep each user's data clean and portable.
+
+## MemCube structure
+
+Every MemCube has a fixed structure with five key fields:
+
+```
+MemCube
+ ├── user_id       — the user this cube belongs to
+ ├── cube_id       — a unique identifier you assign (UUID recommended)
+ ├── text_mem      — textual memory: facts, preferences, knowledge
+ ├── act_mem       — activation memory: KV-cache for inference acceleration
+ └── para_mem      — parametric memory: LoRA adapter weights
+```
+
+- **`user_id`** identifies which user owns this MemCube.
+- **`cube_id`** is a unique string you create and manage — for example, `"user-abc-main"` or a UUID like `"f3a9c1d2-..."`. You reference this ID in every add and search request.
+- **`text_mem`**, **`act_mem`**, and **`para_mem`** are the three memory type slots. Most applications use `text_mem`. See [Memory types](/concepts/memory-types) for details on each.
+
+## Writable vs. readable cube IDs
+
+MemOS separates the concept of where you write memories from where you read them. This distinction lets you build flexible multi-cube topologies — for example, a personal cube plus a shared team cube.
+
+| Field | Used for | Behavior |
+|-------|----------|---------|
+| `writable_cube_ids` | Add operations (`POST /product/add`) | Writes memories into all listed cubes in parallel |
+| `readable_cube_ids` | Search operations (`POST /product/search`) | Searches across all listed cubes; results include the source `cube_id` |
+
+You can list multiple cubes in either field. When you write to multiple cubes, MemOS processes all writes in parallel. When you search across multiple cubes, results are merged and each result includes which cube it came from.
+
+## Adding memories to a cube
+
+To add memories, include `writable_cube_ids` in your request body alongside your messages:
+
+```json
+POST /product/add
+{
+  "user_id": "user-abc",
+  "writable_cube_ids": ["user-abc-main"],
+  "messages": [
+    {"role": "user", "content": "I prefer dark mode and use VS Code."},
+    {"role": "assistant", "content": "Got it, I'll remember your preferences."}
+  ],
+  "async_mode": "sync"
+}
+```
+
+MemOS extracts structured memories from the messages and stores them in the `text_mem` of `user-abc-main`.
+
+## Searching memories from a cube
+
+To search, use `readable_cube_ids` with a natural-language query:
+
+```json
+POST /product/search
+{
+  "user_id": "user-abc",
+  "readable_cube_ids": ["user-abc-main"],
+  "query": "What editor does the user prefer?"
+}
+```
+
+The response returns relevant memories grouped by type:
+
+```json
+{
+  "text_mem": [
+    {
+      "cube_id": "user-abc-main",
+      "memories": [
+        {
+          "id": "mem-001",
+          "memory": "User prefers dark mode and uses VS Code.",
+          "metadata": {
+            "type": "preference",
+            "confidence": 95,
+            "source": "conversation"
+          }
+        }
+      ]
+    }
+  ],
+  "act_mem": [],
+  "para_mem": []
+}
+```
+
+## Multi-cube search
+
+When you need to search across multiple memory spaces — for example, a user's personal cube and a shared knowledge base — list both in `readable_cube_ids`:
+
+```json
+POST /product/search
+{
+  "user_id": "user-abc",
+  "readable_cube_ids": ["user-abc-main", "shared-knowledge-base"],
+  "query": "What are the deployment requirements?"
+}
+```
+
+Results from each cube are returned together. Each result includes a `cube_id` field so you know where it came from.
+
+<Tip>
+  Use separate MemCubes to model different memory scopes: a personal cube per user, a shared cube for team knowledge, and a domain cube for product documentation. Search across all of them in a single request.
+</Tip>
+
+## Sync vs. async mode
+
+Every add request includes `async_mode` to control whether MemOS waits for the operation to complete:
+
+<Tabs>
+  <Tab title="Sync mode">
+    MemOS processes the memory extraction and storage immediately and waits until it finishes before returning a response.
+
+    ```json
+    {
+      "user_id": "user-abc",
+      "writable_cube_ids": ["user-abc-main"],
+      "messages": [...],
+      "async_mode": "sync"
+    }
+    ```
+
+    Use sync mode during development and testing when you need confirmation that memories were stored before proceeding.
+  </Tab>
+  <Tab title="Async mode">
+    MemOS submits the work to the MemScheduler background queue and returns a `task_id` immediately — without waiting for extraction to finish.
+
+    ```json
+    {
+      "user_id": "user-abc",
+      "writable_cube_ids": ["user-abc-main"],
+      "messages": [...],
+      "async_mode": "async"
+    }
+    ```
+
+    The response returns a `task_id`. Poll `GET /product/scheduler/status` with your `user_id` and `task_id` to check when the operation completes.
+
+    Use async mode in production to keep your API responses fast under load.
+  </Tab>
+</Tabs>
+
+## Persisting and transferring MemCubes
+
+A MemCube can be exported to disk and reloaded at any time, making it portable across sessions, environments, or models. This is useful for:
+
+- Backing up a user's full memory state
+- Migrating memory from one deployment to another
+- Sharing a curated memory set across multiple agents
+
+<Note>
+  When exporting and importing MemCubes, ensure the embedding model and dimensions match between the export and import environments. Mismatched embeddings will cause inaccurate search results.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Memory types" icon="layers" href="/concepts/memory-types">
+    Learn what's stored inside each MemCube — textual, activation, and parametric memory.
+  </Card>
+  <Card title="MemScheduler" icon="clock" href="/concepts/mem-scheduler">
+    Understand how async mode works and how to track background task status.
+  </Card>
+</CardGroup>

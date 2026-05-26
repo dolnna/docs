@@ -1,0 +1,109 @@
+---
+title: "How MemOS Memory Works: Core Concepts"
+description: "Learn how MemOS organizes memory into MemCubes, processes inputs asynchronously, and retrieves context to power AI agents and LLM applications."
+---
+
+MemOS gives your LLM applications a structured memory layer — not just a database, but an operating system for memory. When you send a conversation to MemOS, it automatically extracts facts and preferences, stores them in organized containers called MemCubes, and retrieves the most relevant memories when you need them. This page explains how those pieces fit together and how a typical request flows through the system.
+
+## System components
+
+MemOS is made up of five coordinating components, each with a distinct responsibility:
+
+<CardGroup cols={2}>
+  <Card title="MOS (Memory Operating System)" icon="server">
+    The orchestration layer. MOS coordinates all other components, manages multi-user memory workflows, and exposes the unified API you interact with.
+  </Card>
+  <Card title="MemCube" icon="box">
+    Your memory container. Each user or project gets a MemCube that holds all three memory types — textual, activation, and parametric — in one portable unit.
+  </Card>
+  <Card title="MemReader" icon="file-text">
+    The input parser. MemReader processes raw inputs — conversations, documents, images, URLs — and converts them into structured memory items ready for storage.
+  </Card>
+  <Card title="MemScheduler" icon="clock">
+    The async processor. MemScheduler runs memory operations in the background so your application stays responsive under load. It returns a `task_id` you can poll for status.
+  </Card>
+  <Card title="MemFeedback" icon="message-square">
+    The correction engine. When a user says "that's wrong" or corrects the AI, MemFeedback locates and updates the relevant memories — maintaining a version history for auditability.
+  </Card>
+</CardGroup>
+
+## How a request flows through MemOS
+
+Every `add` or `search` call follows the same path through MemOS. Understanding this flow helps you reason about latency, async behavior, and what happens to your data.
+
+<Steps>
+  <Step title="You send messages to the add endpoint">
+    You `POST /product/add` with a `user_id`, one or more `writable_cube_ids`, and a list of messages. Each message has a `role` (`user` or `assistant`) and `content`.
+  </Step>
+  <Step title="MemReader parses the input">
+    MemReader analyzes the messages, uses an LLM to extract meaningful facts, preferences, and events, and converts them into structured memory objects with metadata like type, confidence, and source.
+  </Step>
+  <Step title="MemCube stores the memories">
+    The extracted memory items are written into the textual memory store inside the target MemCube. Depending on your configuration, this uses vector search (Qdrant), graph storage (Neo4j), or lightweight in-memory storage (SQLite).
+  </Step>
+  <Step title="You search for relevant memories">
+    When you call `POST /product/search` with a query, MemOS runs semantic similarity search across the `readable_cube_ids` you specify and returns the top matching memories.
+  </Step>
+  <Step title="You inject memories into your LLM context">
+    You take the returned `text_mem` array and include it in your LLM's system prompt or context window. Your model now has relevant, personalized memory — with no extra tokens wasted on irrelevant history.
+  </Step>
+</Steps>
+
+## Sync vs. async modes
+
+Every `add` request includes an `async_mode` field that controls whether MemOS waits for the operation to finish before responding.
+
+| Mode | Behavior | Returns | Best for |
+|------|----------|---------|---------|
+| `"sync"` | Blocks until memory extraction and storage complete | Confirmation that memories were stored | Development, testing, low-traffic use cases |
+| `"async"` | Submits the work to MemScheduler and returns immediately | A `task_id` you can poll | Production, high-traffic, responsive APIs |
+
+In async mode, the memory operation runs in the background via MemScheduler. You can check its status by calling `GET /product/scheduler/status` with your `user_id` and `task_id`.
+
+<Info>
+  Search (`POST /product/search`) is always synchronous — it blocks and returns results directly. Only `add` and similar write operations support async mode.
+</Info>
+
+## Request flow diagram
+
+```
+Your application
+      │
+      ▼
+POST /product/add
+      │
+      ▼
+  MemReader ──► extracts structured memories
+      │
+      ▼
+  MemCube ──────► stores in text_mem (Qdrant / Neo4j / SQLite)
+      │
+      ▼
+  [async_mode: "async"] ──► MemScheduler queue ──► returns task_id
+  [async_mode: "sync"]  ──► waits for completion ──► returns confirmation
+      │
+POST /product/search
+      │
+      ▼
+  MemCube search ──► vector + graph retrieval
+      │
+      ▼
+  Returns { text_mem: [...] }
+      │
+      ▼
+  Inject into LLM context
+```
+
+## Explore the core concepts
+
+<CardGroup cols={3}>
+  <Card title="MemCube" icon="box" href="/concepts/mem-cube">
+    How memory containers work, what fields they expose, and how to use writable vs. readable cube IDs.
+  </Card>
+  <Card title="Memory types" icon="layers" href="/concepts/memory-types">
+    The three memory types inside every MemCube — textual, activation, and parametric — and when to use each.
+  </Card>
+  <Card title="MemScheduler" icon="clock" href="/concepts/mem-scheduler">
+    How async memory processing works, when to use it, and how to track task status.
+  </Card>
+</CardGroup>

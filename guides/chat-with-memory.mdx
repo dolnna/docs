@@ -1,0 +1,173 @@
+---
+title: "Chat with Memory-Augmented Responses"
+description: "Use MemOS chat endpoints to automatically retrieve relevant memories and inject them into your LLM's context, producing personalized, stateful responses."
+---
+
+The `/product/chat/complete` and `/product/chat/stream` endpoints combine memory retrieval and LLM generation into a single call. Instead of manually searching for memories and building prompts, you send a query and MemOS handles everything: it fetches the most relevant memories from your specified cubes, constructs an augmented prompt, calls the configured LLM, and returns the response. New conversation content is also stored back into memory automatically.
+
+## Prerequisites
+
+- A running MemOS instance with `ENABLE_CHAT_API=true` set in your environment
+- At least one MemCube with existing memories (see [Add and Search Memory](/guides/add-search-memory))
+- A `user_id` and one or more `readable_cube_ids` and `writable_cube_ids`
+
+<Warning>
+  The chat endpoints are disabled by default in self-hosted deployments. Set `ENABLE_CHAT_API=true` in your `.env` file before starting the server, otherwise these endpoints return `503 Service Unavailable`.
+</Warning>
+
+## Choose a response mode
+
+MemOS offers two chat endpoint variants:
+
+| Endpoint | Response type | When to use |
+| --- | --- | --- |
+| `POST /product/chat/complete` | JSON — full response returned at once | Batch processing, testing, simple integrations |
+| `POST /product/chat/stream` | Server-Sent Events (SSE) — tokens streamed as they are generated | Real-time chat UIs, low-latency interactions |
+
+Both endpoints accept the same core fields.
+
+## Non-streaming chat
+
+Use `/product/chat/complete` when you want a single JSON response with the full answer.
+
+<Steps>
+  <Step title="Build the request">
+
+    | Field | Type | Description |
+    | --- | --- | --- |
+    | `user_id` | string | The user sending the message. |
+    | `query` | string | The user's current message or question. |
+    | `readable_cube_ids` | string[] | MemCubes to retrieve memories from for context. |
+    | `writable_cube_ids` | string[] | MemCubes to write new memories into after the conversation turn. |
+    | `history` | object[] | Optional prior conversation turns to include in the prompt window. |
+    | `top_k` | integer | Number of memories to retrieve and inject. Defaults to `10`. |
+
+  </Step>
+  <Step title="Send the request">
+
+    <CodeGroup>
+
+    ```bash curl
+    curl -X POST https://your-memos-host/product/chat/complete \
+      -H "Content-Type: application/json" \
+      -d '{
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "query": "What should I have for dinner tonight?",
+        "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "top_k": 10
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    response = requests.post(
+        "https://your-memos-host/product/chat/complete",
+        json={
+            "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "query": "What should I have for dinner tonight?",
+            "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "top_k": 10,
+        }
+    )
+
+    data = response.json()
+    print(data["data"]["response"])
+    ```
+
+    </CodeGroup>
+
+  </Step>
+  <Step title="Read the response">
+
+    ```json
+    {
+      "code": 200,
+      "message": "Chat completed successfully",
+      "data": {
+        "response": "Based on what I know about you, you prefer omakase-style dining and avoid shellfish. For a home dinner tonight, you might enjoy a simple chirashi bowl with salmon, tuna, and yellowtail — no shellfish needed. If you are going out, Ichizushi in Shibuya would fit your preferences well."
+      }
+    }
+    ```
+
+    The response is grounded in the memories MemOS retrieved — in this example, the user's dining preferences stored in a previous session.
+
+  </Step>
+</Steps>
+
+## Streaming chat
+
+Use `/product/chat/stream` to receive the response as a Server-Sent Events stream. Each SSE event carries a token chunk, allowing your UI to display the answer as it is generated.
+
+<Steps>
+  <Step title="Send the streaming request">
+
+    <CodeGroup>
+
+    ```bash curl
+    curl -X POST https://your-memos-host/product/chat/stream \
+      -H "Content-Type: application/json" \
+      -H "Accept: text/event-stream" \
+      -d '{
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "query": "Remind me of the Tokyo restaurant recommendations.",
+        "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "writable_cube_ids": ["cube-a1b2c3d4-personal"]
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    with requests.post(
+        "https://your-memos-host/product/chat/stream",
+        json={
+            "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "query": "Remind me of the Tokyo restaurant recommendations.",
+            "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+        },
+        stream=True,
+    ) as resp:
+        for line in resp.iter_lines():
+            if line:
+                print(line.decode("utf-8"))
+    ```
+
+    </CodeGroup>
+
+  </Step>
+  <Step title="Process the SSE events">
+    Each event arrives as a `data:` line followed by a JSON payload with a `type` and `data` field:
+
+    ```
+    data: {"type": "text", "data": "For"}
+    data: {"type": "text", "data": " your"}
+    data: {"type": "text", "data": " Tokyo"}
+    data: {"type": "text", "data": " trip"}
+    ```
+
+    Concatenate all `"text"` event `data` values to assemble the complete response. The stream closes naturally when the LLM finishes generating.
+  </Step>
+</Steps>
+
+## How memory augmentation works
+
+When you call either chat endpoint, MemOS runs the following pipeline automatically:
+
+1. **Retrieve** — MemOS searches `readable_cube_ids` for memories relevant to your `query`, using the same semantic search as `POST /product/search`.
+2. **Augment** — Retrieved memories are injected into the system prompt alongside any conversation history you provided in `history`.
+3. **Generate** — The LLM configured on your MemOS instance generates a response using the augmented prompt.
+4. **Memorize** — The new conversation turn (query + response) is extracted and written back to `writable_cube_ids`, so future calls benefit from this exchange too.
+
+<Note>
+  You can pass `add_message_on_answer: false` to disable step 4 if you do not want the current turn persisted — useful for one-off queries or ephemeral sessions.
+</Note>
+
+## Next steps
+
+- [Correct memories with feedback](/guides/feedback-correction) — fix incorrect facts that the LLM is using
+- [Search across multiple cubes](/guides/multi-cube) — combine personal and shared knowledge in one chat call
+- [Connect AI assistants via MCP](/guides/mcp-integration) — let Claude or Cursor use MemOS memory as a tool

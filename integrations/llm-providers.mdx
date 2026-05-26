@@ -1,0 +1,188 @@
+---
+title: "Connect MemOS to Your LLM Provider"
+description: "Configure MemOS to use any OpenAI-compatible LLM and embedding provider, including OpenAI, Azure, Qwen, DeepSeek, Ollama, and more."
+---
+
+MemOS decouples its memory processing logic from any specific LLM provider. As long as your provider exposes an OpenAI-compatible Chat Completions API, you can point MemOS at it with a few environment variables. The same pattern applies to your embedding provider, which powers semantic search across stored memories.
+
+You need to configure two models: a **chat model** (used for memory extraction, summarization, and the optional Chat API) and an **embedder** (used to generate vectors for semantic retrieval).
+
+---
+
+## Chat model configuration
+
+Set these variables in your `.env` file or shell environment:
+
+| Variable | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | API key for your provider |
+| `OPENAI_API_BASE` | Base URL for the Chat Completions endpoint |
+| `MOS_CHAT_MODEL` | Default model name for memory extraction, summarization, and chat |
+| `CHAT_MODEL_LIST` | JSON array of model configs for the Chat API |
+
+<Tabs>
+  <Tab title="OpenAI">
+    ```env
+    OPENAI_API_KEY=sk-...
+    OPENAI_API_BASE=https://api.openai.com/v1
+    MOS_CHAT_MODEL=gpt-4o-mini
+
+    CHAT_MODEL_LIST=[{"backend": "openai", "api_key": "sk-...", "model_name_or_path": "gpt-4o-mini", "support_models": ["gpt-4o-mini"]}]
+    ```
+  </Tab>
+  <Tab title="Azure OpenAI">
+    ```env
+    OPENAI_API_KEY=your-azure-key
+    OPENAI_API_BASE=https://your-resource.openai.azure.com/openai/deployments/your-deployment/
+    MOS_CHAT_MODEL=your-deployment-name
+
+    CHAT_MODEL_LIST=[{"backend": "azure", "api_key": "your-azure-key", "api_base": "https://your-resource.openai.azure.com/", "model_name_or_path": "your-deployment-name", "support_models": ["your-deployment-name"]}]
+    ```
+  </Tab>
+  <Tab title="Qwen (DashScope)">
+    ```env
+    OPENAI_API_KEY=your-dashscope-api-key
+    OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+    MOS_CHAT_MODEL=qwen3-max
+
+    CHAT_MODEL_LIST=[{"backend": "qwen", "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1", "api_key": "your-dashscope-api-key", "model_name_or_path": "qwen3-max", "extra_body": {"enable_thinking": true}, "support_models": ["qwen3-max"]}]
+    ```
+
+    <Tip>
+      You can get a DashScope API key and base URL from the [Alibaba Cloud Bailian console](https://bailian.console.aliyun.com/).
+    </Tip>
+  </Tab>
+  <Tab title="DeepSeek">
+    ```env
+    OPENAI_API_KEY=your-deepseek-api-key
+    OPENAI_API_BASE=https://api.deepseek.com/v1
+    MOS_CHAT_MODEL=deepseek-chat
+
+    CHAT_MODEL_LIST=[{"backend": "deepseek", "api_key": "your-deepseek-api-key", "api_base": "https://api.deepseek.com/v1", "model_name_or_path": "deepseek-chat", "support_models": ["deepseek-chat"]}]
+    ```
+
+    Use `deepseek-reasoner` instead of `deepseek-chat` for the reasoning model.
+  </Tab>
+  <Tab title="Ollama">
+    ```env
+    OPENAI_API_KEY=ollama
+    OPENAI_API_BASE=http://localhost:11434/v1
+    MOS_CHAT_MODEL=qwen3:0.6b
+
+    CHAT_MODEL_LIST=[{"backend": "ollama", "model_name_or_path": "qwen3:0.6b", "support_models": ["qwen3:0.6b"]}]
+    ```
+
+    <Note>
+      Ollama must be running locally before you start MemOS. Install it with `curl -fsSL https://ollama.com/install.sh | sh`, then pull your model with `ollama pull qwen3:0.6b`.
+    </Note>
+  </Tab>
+  <Tab title="vLLM">
+    ```env
+    OPENAI_API_KEY=vllm
+    OPENAI_API_BASE=http://localhost:8001/v1
+    MOS_CHAT_MODEL=Qwen/Qwen2.5-7B-Instruct
+
+    CHAT_MODEL_LIST=[{"backend": "vllm", "api_base": "http://localhost:8001/v1", "model_name_or_path": "Qwen/Qwen2.5-7B-Instruct", "support_models": ["Qwen/Qwen2.5-7B-Instruct"]}]
+    ```
+  </Tab>
+  <Tab title="HuggingFace (local)">
+    ```env
+    MOS_CHAT_MODEL=Qwen/Qwen3-1.7B
+
+    CHAT_MODEL_LIST=[{"backend": "huggingface", "model_name_or_path": "Qwen/Qwen3-1.7B", "support_models": ["Qwen/Qwen3-1.7B"]}]
+    ```
+
+    <Warning>
+      Local HuggingFace models require PyTorch installed in your environment. A CUDA-enabled GPU is strongly recommended for acceptable inference speed.
+    </Warning>
+  </Tab>
+</Tabs>
+
+---
+
+## Memory Reader model
+
+The Memory Reader is a separate model used for tasks like document chunking and memory extraction from files. Configure it independently to use a different model or API key from your main chat model:
+
+```env
+MEMRADER_MODEL=qwen3-max
+MEMRADER_API_KEY=your-api-key
+MEMRADER_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+You can point `MEMRADER_API_BASE` at the same provider as your chat model or a different one.
+
+---
+
+## Embedder configuration
+
+MemOS uses the embedder to convert memories and queries into vectors for semantic search. Configure the embedder backend separately from the chat model.
+
+| Variable | Purpose |
+|---|---|
+| `MOS_EMBEDDER_BACKEND` | Embedding backend: `universal_api` or `ollama` |
+| `MOS_EMBEDDER_MODEL` | Model name or path |
+| `MOS_EMBEDDER_API_BASE` | Base URL for the embeddings endpoint |
+| `MOS_EMBEDDER_API_KEY` | API key for the embeddings endpoint |
+| `EMBEDDING_DIMENSION` | Vector dimension output by your model |
+
+<Tabs>
+  <Tab title="OpenAI embeddings">
+    ```env
+    MOS_EMBEDDER_BACKEND=universal_api
+    MOS_EMBEDDER_MODEL=text-embedding-3-large
+    MOS_EMBEDDER_API_BASE=https://api.openai.com/v1
+    MOS_EMBEDDER_API_KEY=sk-...
+    EMBEDDING_DIMENSION=3072
+    ```
+  </Tab>
+  <Tab title="Qwen embeddings (DashScope)">
+    ```env
+    MOS_EMBEDDER_BACKEND=universal_api
+    MOS_EMBEDDER_MODEL=text-embedding-v4
+    MOS_EMBEDDER_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+    MOS_EMBEDDER_API_KEY=your-dashscope-api-key
+    EMBEDDING_DIMENSION=1024
+    ```
+  </Tab>
+  <Tab title="Ollama embeddings">
+    ```env
+    MOS_EMBEDDER_BACKEND=ollama
+    MOS_EMBEDDER_MODEL=nomic-embed-text:latest
+    MOS_EMBEDDER_API_BASE=http://localhost:11434
+    EMBEDDING_DIMENSION=768
+    ```
+
+    Pull the model first: `ollama pull nomic-embed-text:latest`
+  </Tab>
+  <Tab title="Custom OpenAI-compatible">
+    ```env
+    MOS_EMBEDDER_BACKEND=universal_api
+    MOS_EMBEDDER_MODEL=your-embedding-model
+    MOS_EMBEDDER_API_BASE=http://your-host:8081/v1
+    MOS_EMBEDDER_API_KEY=your-api-key
+    EMBEDDING_DIMENSION=1024
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  Set `EMBEDDING_DIMENSION` to match the exact output dimension of your chosen model. A mismatch causes vector store errors at runtime. Common values: `768` (nomic-embed-text), `1024` (text-embedding-v4), `1536` (text-embedding-ada-002), `3072` (text-embedding-3-large).
+</Warning>
+
+---
+
+## Reranker
+
+After vector retrieval, MemOS optionally reranks results to improve relevance. Set the reranker backend with:
+
+```env
+MOS_RERANKER_BACKEND=cosine_local
+```
+
+| Value | Description |
+|---|---|
+| `cosine_local` | Default. Reranks using local cosine similarity — no extra service needed. |
+| `http_bge` | Uses an external BGE reranker HTTP service for higher-quality reranking. |
+
+Use `cosine_local` unless you have a BGE reranker service deployed and need higher retrieval precision.

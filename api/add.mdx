@@ -1,0 +1,242 @@
+---
+title: 'Add memories — POST /product/add'
+description: 'Extract and store memories from conversation messages into one or more MemCubes. Supports synchronous and asynchronous processing modes.'
+---
+
+The Add endpoint processes conversation messages and extracts structured memories from them, writing the results into the MemCubes you specify. MemOS analyzes the messages using an LLM, deduplicates new memories against existing ones, and persists the extracted facts, preferences, and behavioral signals. You can run the operation synchronously to wait for completion, or asynchronously to receive a task ID and poll for results.
+
+## Endpoint
+
+```
+POST /product/add
+```
+
+## Request body
+
+<ParamField body="user_id" type="string" required>
+  The unique identifier for the user whose memory you are updating.
+</ParamField>
+
+<ParamField body="writable_cube_ids" type="string[]" required>
+  List of MemCube IDs that this request is allowed to write to. You must have write access to each cube listed.
+</ParamField>
+
+<ParamField body="messages" type="object[]" required>
+  Conversation messages to extract memories from. Each message must have a `role` (`"user"` or `"assistant"`) and a `content` string.
+
+  <Expandable title="message object">
+    <ParamField body="messages[].role" type="string" required>
+      Role of the speaker. One of `"user"`, `"assistant"`, or `"system"`.
+    </ParamField>
+    <ParamField body="messages[].content" type="string" required>
+      Text content of the message.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="async_mode" type="string" default="async">
+  Processing mode. Use `"sync"` to block until memories are written and receive confirmation in the response. Use `"async"` to enqueue the operation immediately and return a `task_id` for polling. Default: `"async"`.
+</ParamField>
+
+<ParamField body="session_id" type="string">
+  Optional session identifier. When provided, MemOS uses it as a soft signal to associate memories with the current conversation context.
+</ParamField>
+
+<ParamField body="custom_tags" type="string[]">
+  Custom tags to attach to all memories created by this request, for example `["travel", "preferences"]`. Tags can be used as filters in subsequent search requests.
+</ParamField>
+
+<ParamField body="info" type="object">
+  Additional metadata attached to every memory created by this request. All keys are available as search filters.
+
+  <Expandable title="info object">
+    <ParamField body="info.agent_id" type="string">
+      Identifier of the agent submitting this request.
+    </ParamField>
+    <ParamField body="info.source_type" type="string">
+      Source type of the content, for example `"web"` or `"chat"`.
+    </ParamField>
+    <ParamField body="info.source_url" type="string">
+      URL of the source document or page.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="is_feedback" type="boolean" default="false">
+  When `true`, routes the request through the feedback handler instead of the standard add pipeline. Use the dedicated [Feedback endpoint](/api/feedback) for explicit correction flows.
+</ParamField>
+
+## Response
+
+<ResponseField name="code" type="number" required>
+  HTTP-style status code. `200` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable status message, for example `"Memory created successfully"`.
+</ResponseField>
+
+<ResponseField name="data" type="object | null">
+  Present when `async_mode` is `"async"`. `null` when `async_mode` is `"sync"`.
+
+  <Expandable title="data object (async_mode: async)">
+    <ResponseField name="data.success" type="boolean">
+      Whether the task was successfully enqueued.
+    </ResponseField>
+    <ResponseField name="data.task_id" type="string">
+      Unique identifier for the background task. Poll `GET /product/scheduler/status?user_id=<user_id>&task_id=<task_id>` to check completion status.
+    </ResponseField>
+    <ResponseField name="data.status" type="string">
+      Initial task status. Typically `"waiting"` immediately after enqueue.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Synchronous add
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/add \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "messages": [
+      {
+        "role": "user",
+        "content": "I like eating strawberries"
+      }
+    ],
+    "async_mode": "sync"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/add",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "messages": [
+            {
+                "role": "user",
+                "content": "I like eating strawberries"
+            }
+        ],
+        "async_mode": "sync",
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory created successfully",
+  "data": null
+}
+```
+
+### Asynchronous add
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/add \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "messages": [
+      {
+        "role": "user",
+        "content": "My meeting in Shanghai is on Friday at 3pm"
+      },
+      {
+        "role": "assistant",
+        "content": "Got it, I have noted your Shanghai meeting for Friday at 3pm."
+      }
+    ],
+    "async_mode": "async"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/add",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "messages": [
+            {
+                "role": "user",
+                "content": "My meeting in Shanghai is on Friday at 3pm",
+            },
+            {
+                "role": "assistant",
+                "content": "Got it, I have noted your Shanghai meeting for Friday at 3pm.",
+            },
+        ],
+        "async_mode": "async",
+    },
+)
+data = response.json()
+task_id = data["data"]["task_id"]
+print(f"Task enqueued: {task_id}")
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory created successfully",
+  "data": {
+    "success": true,
+    "task_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+    "status": "waiting"
+  }
+}
+```
+
+After receiving a `task_id`, you can poll for completion:
+
+```bash cURL
+curl "http://localhost:8000/product/scheduler/status?user_id=8736b16e-1d20-4163-980b-a5063c3facdc&task_id=a1b2c3d4-5678-90ab-cdef-1234567890ab"
+```
+
+## Error responses
+
+| Code | Description |
+|------|-------------|
+| `400` | Malformed request body, for example a missing required field. |
+| `422` | Validation error — one or more fields failed type or constraint checks. The response body contains a `detail` array with per-field error messages. |
+| `500` | Internal server error during memory extraction or persistence. |
+
+```json 422
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["body", "writable_cube_ids"],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```

@@ -1,0 +1,217 @@
+---
+title: "Manage Multiple Memory Spaces with MemCubes"
+description: "Isolate, combine, and query across multiple MemCubes to separate user-specific memory from shared knowledge, or to keep agent contexts independent."
+---
+
+A MemCube is a scoped memory container identified by a `cube_id`. Each user, project, team, or agent can have its own cube — and a single API call can read from or write to multiple cubes at once. This lets you compose memory spaces without duplicating data: a personal cube for user-specific facts, a team cube for shared knowledge, and both searched together in one request.
+
+## How cube scoping works
+
+Every `add` and `search` request accepts cube lists rather than a single cube:
+
+- **`writable_cube_ids`** — memories extracted from your messages are written to all listed cubes in parallel.
+- **`readable_cube_ids`** — search results are gathered from all listed cubes and returned together, with a `cube_id` on each result so you know the source.
+
+You choose which cubes to read from and write to independently on each request. A chat agent, for example, might read from both `user-cube` and `team-cube` but write new memories only to `user-cube`.
+
+## Search across multiple cubes
+
+The following example searches two cubes — a personal cube and a shared team cube — in a single request:
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://your-memos-host/product/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "project deadlines",
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "readable_cube_ids": [
+      "cube-a1b2c3d4-personal",
+      "cube-team-engineering-shared"
+    ],
+    "top_k": 5
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "https://your-memos-host/product/search",
+    json={
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "readable_cube_ids": [
+            "cube-a1b2c3d4-personal",
+            "cube-team-engineering-shared",
+        ],
+        "query": "project deadlines",
+        "top_k": 5,
+    },
+)
+data = response.json()
+for cube in data["data"]["text_mem"]:
+    print(f"From cube: {cube['cube_id']}")
+    for memory in cube["memories"]:
+        print(" -", memory["memory"])
+```
+
+</CodeGroup>
+
+The response groups results by source cube, so you can see exactly where each memory came from:
+
+```json
+{
+  "code": 200,
+  "message": "Search memories successfully",
+  "data": {
+    "text_mem": [
+      {
+        "cube_id": "cube-a1b2c3d4-personal",
+        "memories": [
+          {
+            "id": "mem-uuid-101",
+            "memory": "User committed to finishing the API integration by end of Q2.",
+            "metadata": {
+              "memory_type": "WorkingMemory",
+              "relativity": 0.88
+            }
+          }
+        ]
+      },
+      {
+        "cube_id": "cube-team-engineering-shared",
+        "memories": [
+          {
+            "id": "mem-uuid-202",
+            "memory": "Engineering team deadline for the v2.0 release is June 30.",
+            "metadata": {
+              "memory_type": "LongTermMemory",
+              "relativity": 0.92
+            }
+          },
+          {
+            "id": "mem-uuid-203",
+            "memory": "Design review for the dashboard feature is scheduled for June 10.",
+            "metadata": {
+              "memory_type": "LongTermMemory",
+              "relativity": 0.79
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## Write to multiple cubes in parallel
+
+To store the same conversation in two cubes simultaneously — for example, writing to both a user's personal cube and a project-specific cube — list both in `writable_cube_ids`:
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://your-memos-host/product/add \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "writable_cube_ids": [
+      "cube-a1b2c3d4-personal",
+      "cube-project-horizon"
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": "We agreed in the sync today that the launch date is July 15."
+      },
+      {
+        "role": "assistant",
+        "content": "Noted — July 15 is confirmed as the Project Horizon launch date."
+      }
+    ],
+    "async_mode": "sync"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "https://your-memos-host/product/add",
+    json={
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "writable_cube_ids": [
+            "cube-a1b2c3d4-personal",
+            "cube-project-horizon",
+        ],
+        "messages": [
+            {
+                "role": "user",
+                "content": "We agreed in the sync today that the launch date is July 15."
+            },
+            {
+                "role": "assistant",
+                "content": "Noted — July 15 is confirmed as the Project Horizon launch date."
+            }
+        ],
+        "async_mode": "sync",
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+MemOS writes to all listed cubes in parallel — the total latency is the same as writing to one.
+
+## Common patterns
+
+### User-specific memory + shared team knowledge
+
+Give each user their own cube for personal preferences and history. Create a separate shared cube for team-wide knowledge (playbooks, product facts, FAQs). When a user asks a question, search both:
+
+```json
+{
+  "readable_cube_ids": ["cube-user-alice", "cube-team-product"],
+  "writable_cube_ids": ["cube-user-alice"]
+}
+```
+
+New memories generated from the conversation go into Alice's personal cube, while the shared team cube remains read-only from Alice's perspective.
+
+### Agent isolation
+
+Give each agent instance its own cube to prevent one agent's accumulated context from polluting another's. When an agent needs to share knowledge with a sibling agent, read from a common cube:
+
+```json
+{
+  "readable_cube_ids": ["cube-agent-42-session", "cube-shared-domain-knowledge"],
+  "writable_cube_ids": ["cube-agent-42-session"]
+}
+```
+
+### Multi-project context
+
+A user working across multiple projects can have one cube per project plus a personal cube. When they ask about a specific project, include only that project's cube alongside their personal cube:
+
+```json
+{
+  "readable_cube_ids": ["cube-user-bob", "cube-project-vega"],
+  "writable_cube_ids": ["cube-user-bob", "cube-project-vega"]
+}
+```
+
+## Identifying memory sources in results
+
+Because multi-cube search returns results grouped by `cube_id`, you can show users where a memory originated or apply different trust levels to different cubes. The `cube_id` field appears at the group level in the `text_mem` array — iterate over groups to inspect per-cube results.
+
+<Tip>
+  Keep cube IDs consistent and descriptive. A format like `"{owner-id}-{purpose}"` — such as `"alice-personal"` or `"team-engineering-shared"` — makes it easy to understand cube ownership at a glance.
+</Tip>
+
+## Next steps
+
+- [Add and search memory](/guides/add-search-memory) — the foundation for working with individual cubes
+- [Chat with memory-augmented responses](/guides/chat-with-memory) — use `readable_cube_ids` and `writable_cube_ids` in chat requests too
+- [Connect AI assistants via MCP](/guides/mcp-integration) — expose multi-cube memory to tools like Claude Desktop or Cursor

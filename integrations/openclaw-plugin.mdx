@@ -1,0 +1,205 @@
+---
+title: "Add Persistent Memory to OpenClaw with MemOS"
+description: "Give your OpenClaw agents persistent, searchable memory and reduce token consumption by up to 72% using the MemOS cloud or local plugin."
+---
+
+OpenClaw agents burn through tokens fast — every new conversation re-injects the full history, global memories, and daily logs regardless of relevance. The MemOS OpenClaw plugin replaces that pattern with precision retrieval: MemOS stores your memories externally and injects only the 3–5 most relevant items per task, keeping context under 2,000–3,000 tokens no matter how long you run your agent.
+
+## Choose your plugin
+
+MemOS offers two plugin options for OpenClaw. Use the cloud plugin if you want the quickest setup with cross-device memory sharing. Use the local plugin if you need full data privacy with everything stored on your machine.
+
+| | Cloud plugin | Local plugin |
+|---|---|---|
+| **Storage** | MemOS Cloud | SQLite on your machine |
+| **Setup** | API key only | One-line installer |
+| **Cross-device** | Yes | LAN/VPN sharing only |
+| **Privacy** | Cloud-hosted | 100% on-device |
+| **Memory layers** | Structured + deduped | L1–L3 + crystallized Skills |
+| **Best for** | Quick start, teams | Privacy, observability |
+
+---
+
+## Cloud plugin
+
+The cloud plugin stores your memories in MemOS Cloud. One API key is all you need to get started.
+
+<Steps>
+  <Step title="Install OpenClaw">
+    Make sure you have OpenClaw installed and initialized before adding the plugin.
+
+    ```bash
+    npm install -g openclaw@latest
+    openclaw onboard
+    ```
+  </Step>
+
+  <Step title="Get your API key">
+    Sign in to the [MemOS Cloud Dashboard](https://memos-dashboard.openmem.net/apikeys/) and create an API key. Your key starts with `mpg-`.
+  </Step>
+
+  <Step title="Configure the API key">
+    Add your key to OpenClaw's environment file. The plugin reads env files in priority order: `~/.openclaw/.env`, then `~/.moltbot/.env`, then `~/.clawdbot/.env`, then the process environment.
+
+    <Tabs>
+      <Tab title="macOS / Linux">
+        ```bash
+        echo 'MEMOS_API_KEY=mpg-...' >> ~/.openclaw/.env
+        ```
+      </Tab>
+      <Tab title="Windows PowerShell">
+        ```powershell
+        [System.Environment]::SetEnvironmentVariable("MEMOS_API_KEY", "mpg-...", "User")
+        ```
+      </Tab>
+    </Tabs>
+
+    The minimal `.env` entry is:
+
+    ```env
+    MEMOS_API_KEY=mpg-your-key-here
+    ```
+  </Step>
+
+  <Step title="Install the plugin">
+    <Tabs>
+      <Tab title="npm (recommended)">
+        ```bash
+        openclaw plugins install @memtensor/memos-cloud-openclaw-plugin@latest
+        openclaw gateway restart
+        ```
+      </Tab>
+      <Tab title="Manual install (Windows fallback)">
+        If you encounter `Error: spawn EINVAL` on Windows, use the manual path instead:
+
+        1. Download the latest `.tgz` from [npm](https://www.npmjs.com/package/@memtensor/memos-cloud-openclaw-plugin).
+        2. Extract it to `%USERPROFILE%\.openclaw\extensions\memos-cloud-openclaw-plugin`.
+        3. Update `~/.openclaw/openclaw.json` to include the extracted path:
+
+        ```json
+        {
+          "plugins": {
+            "entries": {
+              "memos-cloud-openclaw-plugin": { "enabled": true }
+            },
+            "load": {
+              "paths": [
+                "C:\\Users\\YourName\\.openclaw\\extensions\\memos-cloud-openclaw-plugin\\package"
+              ]
+            }
+          }
+        }
+        ```
+
+        Restart the gateway after saving.
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Verify the plugin is enabled">
+    Confirm `~/.openclaw/openclaw.json` includes the plugin entry:
+
+    ```json
+    {
+      "plugins": {
+        "entries": {
+          "memos-cloud-openclaw-plugin": { "enabled": true }
+        }
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+### Update the cloud plugin
+
+Run this command whenever a new version is available:
+
+```bash
+openclaw plugins update @memtensor/memos-cloud-openclaw-plugin@latest
+openclaw gateway restart
+```
+
+---
+
+## Local plugin
+
+The local plugin keeps all memory data on your machine using SQLite. It also supports Hermes Agent using the same memory core.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MemTensor/MemOS/main/apps/memos-local-plugin/install.sh | bash
+```
+
+The installer detects whether OpenClaw and/or Hermes are installed and configures the plugin automatically. After installation, open the Memory Viewer at `http://127.0.0.1:18799` to configure your embedding model and LLM settings.
+
+<Note>
+  Do not install the local plugin with `npm install` directly. The installer script handles agent detection, directory layout, config initialization, and runtime restart.
+</Note>
+
+For full local plugin setup instructions including Hermes Agent support and Memory Viewer configuration, see [Memory for Hermes Agent with MemOS Local Plugin](/integrations/hermes-plugin).
+
+---
+
+## Advanced: multi-agent configuration
+
+The cloud plugin supports per-agent memory isolation and custom retrieval parameters. Enable multi-agent mode in your `openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "memos-cloud-openclaw-plugin": {
+        "enabled": true,
+        "config": {
+          "multiAgentMode": true,
+          "allowedAgents": ["research-agent", "coding-agent"],
+          "memoryLimitNumber": 6,
+          "relativity": 0.45,
+          "agentOverrides": {
+            "research-agent": {
+              "knowledgebaseIds": ["kb-research-papers"],
+              "memoryLimitNumber": 12,
+              "relativity": 0.3
+            },
+            "coding-agent": {
+              "knowledgebaseIds": ["kb-codebase"],
+              "memoryLimitNumber": 9,
+              "addEnabled": false
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+<Tip>
+  Set `allowedAgents` to an explicit list to avoid charging token budget for agents that don't need memory. If the list is empty or omitted, all agents use memory retrieval.
+</Tip>
+
+When `multiAgentMode` is `true`, the plugin reads `ctx.agentId` from each conversation and isolates memory reads and writes per agent. The default `"main"` agent ID is excluded from isolation to preserve backward compatibility with existing memory data.
+
+---
+
+## Visual configuration UI
+
+Starting from version `v0.1.12`, the cloud plugin includes a local configuration UI. Once the plugin loads and the gateway is ready, it automatically starts the Config UI at `http://127.0.0.1:38463`. Open that URL in your browser to edit knowledge base IDs, retrieval parameters, and multi-agent rules without restarting the service.
+
+---
+
+## Test your setup
+
+Start a conversation with your OpenClaw agent and share a preference:
+
+```
+First conversation:
+  "My favourite programming language is Python."
+  "I'm working on an e-commerce project."
+
+Second conversation (new session):
+  "Which programming language do I prefer?"
+  "What project am I working on?"
+```
+
+OpenClaw retrieves the relevant memories from MemOS and answers accurately — without re-loading full conversation history.

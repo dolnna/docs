@@ -1,0 +1,153 @@
+---
+title: 'Get suggestions — POST /product/suggestions'
+description: 'Generate suggested follow-up questions for a user based on recent conversation context or stored memories. Useful for building guided chat UIs.'
+---
+
+The Suggestions endpoint generates recommended follow-up questions for a user. You can provide recent conversation messages to get context-aware suggestions, or omit them to generate questions based on the user's stored memories. Use this endpoint to build a "suggested questions" panel in your chat UI, helping users discover relevant topics they can explore with their AI agent.
+
+## Endpoint
+
+```
+POST /product/suggestions
+```
+
+## Request body
+
+<ParamField body="user_id" type="string" required>
+  The unique identifier for the user. MemOS uses this to retrieve the user's stored memories when generating suggestions.
+</ParamField>
+
+<ParamField body="mem_cube_id" type="string" required>
+  The MemCube ID to read memories from when generating suggestions.
+</ParamField>
+
+<ParamField body="language" type="string" default="zh">
+  Language for the generated suggestions. `"en"` for English, `"zh"` for Chinese. Defaults to `"zh"`.
+</ParamField>
+
+<ParamField body="message" type="object[]">
+  Optional recent conversation messages. When provided, MemOS uses the dialogue context to generate follow-up questions relevant to the current conversation. Each message requires a `role` (`"user"` or `"assistant"`) and `content` string.
+</ParamField>
+
+## Response
+
+<ResponseField name="code" type="number" required>
+  HTTP-style status code. `200` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable status message.
+</ResponseField>
+
+<ResponseField name="data" type="string[]" required>
+  List of suggested follow-up questions, typically 3 items.
+</ResponseField>
+
+## Examples
+
+### Suggestions from conversation context
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/suggestions \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+    "language": "en",
+    "message": [
+      {
+        "role": "user",
+        "content": "What sushi restaurants do you recommend for my Tokyo trip?"
+      },
+      {
+        "role": "assistant",
+        "content": "Based on your preference for omakase-style dining, I recommend Sukiyabashi Jiro."
+      }
+    ]
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/suggestions",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+        "language": "en",
+        "message": [
+            {
+                "role": "user",
+                "content": "What sushi restaurants do you recommend for my Tokyo trip?",
+            },
+            {
+                "role": "assistant",
+                "content": "Based on your preference for omakase-style dining, I recommend Sukiyabashi Jiro.",
+            },
+        ],
+    },
+)
+suggestions = response.json()["data"]
+for s in suggestions:
+    print("-", s)
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Suggestions generated successfully",
+  "data": [
+    "What are the best neighborhoods in Tokyo for food?",
+    "Do you have any dietary restrictions I should know about?",
+    "Would you like recommendations for other cuisine types in Tokyo?"
+  ]
+}
+```
+
+### Suggestions from memory (no conversation context)
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/suggestions \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+    "language": "en"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/suggestions",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+        "language": "en",
+    },
+)
+print(response.json()["data"])
+```
+
+</CodeGroup>
+
+When no `message` is provided, MemOS infers suggestions from the user's recent memories, making this useful for conversation-start prompts.
+
+## Error responses
+
+| Code | Description |
+|------|-------------|
+| `422` | Validation error — missing required fields or invalid `language` value. |
+| `500` | Internal error during suggestion generation. |

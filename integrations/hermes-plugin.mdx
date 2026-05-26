@@ -1,0 +1,146 @@
+---
+title: "Memory for Hermes Agent with MemOS Local Plugin"
+description: "Install the MemOS local plugin to give Hermes Agent self-evolving on-device memory with four layers, three-tier retrieval, and a built-in Memory Viewer."
+---
+
+The `@memtensor/memos-local-plugin` brings persistent, self-evolving memory to Hermes Agent without sending any data to the cloud. Everything — conversation traces, induced policies, world model knowledge, and crystallized skills — is stored in SQLite on your machine. The same plugin core supports OpenClaw on the same machine, but each agent keeps its own isolated database and Memory Viewer.
+
+## How memory evolves
+
+The plugin captures what your agent does and builds on it across tasks:
+
+| Layer | What it stores | How it's created |
+|---|---|---|
+| **L1 Trace** | Step-by-step execution records | Captured automatically after each task |
+| **L2 Policy** | Cross-task strategies and patterns | Induced from similar Traces |
+| **L3 World Model** | Compressed environment knowledge | Rolled up from Policies |
+| **Skill** | Callable, reusable capabilities | Crystallized from high-value strategies |
+
+Before each task, the plugin retrieves relevant context from all four layers and injects it into Hermes. After the task, tool outcomes and feedback update memory value and drive further evolution. The agent gets better at familiar task types over time.
+
+---
+
+## Install
+
+Run the one-line installer on macOS or Linux. It auto-detects which agents are installed and configures each one:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MemTensor/MemOS/main/apps/memos-local-plugin/install.sh | bash
+```
+
+<Warning>
+  Do not use `npm install @memtensor/memos-local-plugin` directly as the primary installation path. The installer script handles agent detection, directory layout, config initialization, and runtime restart automatically.
+</Warning>
+
+In an interactive terminal, the installer asks which agent to install for. In a non-interactive environment (CI, scripts), it installs for all detected agents.
+
+After installation, your Hermes plugin files and data are organized as follows:
+
+| Path | Contents |
+|---|---|
+| `~/.hermes/plugins/memos-local-plugin/` | Plugin code |
+| `~/.hermes/memos-plugin/` | SQLite data, skills, logs, config |
+| `http://127.0.0.1:18800` | Memory Viewer |
+
+To upgrade the plugin, run the same install command again. Your existing data, skill packages, and logs are not deleted during upgrades.
+
+---
+
+## Configure models in the Memory Viewer
+
+<Steps>
+  <Step title="Open the Memory Viewer">
+    After installation, open `http://127.0.0.1:18800` in your browser. This is Hermes' dedicated viewer — it runs separately from the OpenClaw viewer at port `18799`.
+  </Step>
+
+  <Step title="Configure AI models">
+    Go to **Settings → AI Models** and configure:
+    - **Embedding model** — used for vector retrieval. Accepts OpenAI-compatible providers, Gemini, Cohere, Voyage, and Mistral, as well as a local default.
+    - **LLM** — used for policy induction and skill evolver. Enter your provider API key and base URL.
+    - **Skill Evolver** — can use the same or a different LLM.
+
+    Use the **Test** button to confirm each model connects successfully before saving.
+  </Step>
+
+  <Step title="Save and restart">
+    After saving, the Viewer restarts the plugin and loads the new configuration. No manual service restart is required.
+  </Step>
+</Steps>
+
+---
+
+## Start Hermes with memory
+
+After installation and model configuration, start Hermes normally:
+
+```bash
+hermes chat
+```
+
+The plugin intercepts each turn before Hermes builds its prompt. It runs three-tier retrieval across Skills, Traces/Episodes, and World Models, then injects the relevant context. After the turn ends, it writes the conversation, tool calls, observations, and feedback to local memory.
+
+<Note>
+  If the Hermes machine cannot run Node.js, the provider reports as unavailable and Hermes falls back to its built-in in-memory mode.
+</Note>
+
+---
+
+## Verify memory is working
+
+Open the Memory Viewer at `http://127.0.0.1:18800` and check each section after running a few tasks:
+
+| Viewer section | What to check |
+|---|---|
+| **Overview** | Core status, version, and live event stream |
+| **Memories** | Conversations and tool steps captured as L1 Traces |
+| **Tasks / Policies** | How cross-task patterns are being induced |
+| **World Models** | Compressed environment knowledge built up over time |
+| **Skills** | Crystallized capabilities and their lifecycle status |
+| **Analytics** | Retrieval hit rates and memory value scores |
+| **Logs** | Detailed execution logs for debugging |
+
+---
+
+## Three-tier retrieval
+
+When Hermes starts a task, the retriever searches across three tiers simultaneously and combines results using RRF + MMR for relevance and diversity:
+
+1. **Skill tier** — searches callable Skills first; matching skills inject ready-to-use guidance.
+2. **Trace/Episode tier** — searches past execution records for similar tasks using vector, FTS5, keyword pattern, and error-signature channels.
+3. **World Model tier** — queries compressed environment knowledge (project structure, constraints, known behaviors).
+
+This multi-channel approach gives Hermes both precise recall for specific identifiers (error codes, function names) and semantic recall for related concepts.
+
+---
+
+## Memory tools available to Hermes
+
+The plugin exposes memory tools that Hermes can call during a task:
+
+| Tool | Purpose |
+|---|---|
+| `memory_search` | Search across Skills, Traces, and World Models |
+| `memory_get` | Fetch a specific memory record by ID |
+| `memory_timeline` | Inspect an episode or task timeline |
+| `skill_list` | List all callable Skills |
+| `skill_get` | Fetch a Skill's invocation guide |
+| `memory_environment` | Query World Models for project structure and constraints |
+
+Tool successes and failures are both recorded. Failure patterns can trigger decision repair, injecting corrective context into the next turn so Hermes avoids repeating the same mistake.
+
+---
+
+## Data management
+
+| Action | How |
+|---|---|
+| **Back up** | Export JSON from **Viewer → Import**, or copy `~/.hermes/memos-plugin/` |
+| **Clear memory only** | Delete `data/` and `skills/` inside `~/.hermes/memos-plugin/` |
+| **Clear logs** | Delete regular files under `~/.hermes/memos-plugin/logs/` |
+| **Full reset** | Delete `~/.hermes/memos-plugin/` entirely — recreated empty on next start |
+
+---
+
+## Optional: team sharing
+
+By default, OpenClaw and Hermes use separate databases with no shared data. To share crystallized Skills and optional trace excerpts across machines on a LAN or VPN, go to **Settings → Team Sharing** in the Memory Viewer and enable the hub. If the hub is unreachable, the plugin degrades gracefully to local-only mode.

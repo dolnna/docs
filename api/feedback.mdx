@@ -1,0 +1,293 @@
+---
+title: 'Submit feedback — POST /product/feedback'
+description: 'Correct or improve stored memories by submitting natural language feedback. MemOS finds conflicting memories and updates them automatically.'
+---
+
+The Feedback endpoint lets you correct inaccurate or outdated memories using plain language. Instead of locating and editing a memory record manually, you describe the correction in natural language and MemOS handles the rest: it identifies which stored memories conflict with your feedback, resolves the inconsistencies, and updates the MemCube accordingly. This is the recommended way to handle cases where a user tells the assistant that something it remembered was wrong.
+
+## Endpoint
+
+```
+POST /product/feedback
+```
+
+## Request body
+
+<ParamField body="user_id" type="string" required>
+  The unique identifier of the user whose memories you are correcting.
+</ParamField>
+
+<ParamField body="writable_cube_ids" type="string[]">
+  List of MemCube IDs to update. You must have write access to each listed cube.
+</ParamField>
+
+<ParamField body="feedback_content" type="string" required>
+  Natural language description of the correction, for example `"The meeting location is Shanghai, not Beijing"`. MemOS uses this text to find conflicting memories and determine what to update.
+</ParamField>
+
+<ParamField body="history" type="object[]">
+  Recent conversation history providing context for the feedback. Including the messages that led to the incorrect response helps MemOS identify the relevant memories more accurately.
+
+  <Expandable title="message object">
+    <ParamField body="history[].role" type="string" required>
+      Role of the speaker: `"user"` or `"assistant"`.
+    </ParamField>
+    <ParamField body="history[].content" type="string" required>
+      Text content of the message.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="retrieved_memory_ids" type="string[]">
+  IDs of the memories that were recalled during the conversation turn that produced the incorrect response. When provided, MemOS uses this list as a starting point to find memories that need updating, which improves accuracy and reduces processing time.
+</ParamField>
+
+<ParamField body="async_mode" type="string" default="async">
+  Processing mode. `"sync"` blocks until the correction is applied. `"async"` enqueues the operation and returns a `task_id`.
+</ParamField>
+
+<ParamField body="session_id" type="string" default="default_session">
+  Session identifier used to scope the correction to the current conversation context.
+</ParamField>
+
+<ParamField body="corrected_answer" type="boolean" default="false">
+  When `true`, the response includes the corrected answer generated after applying the feedback. Useful when you want to immediately confirm the update took effect.
+</ParamField>
+
+<ParamField body="info" type="object">
+  Additional metadata attached to the correction record.
+
+  <Expandable title="info object">
+    <ParamField body="info.agent_id" type="string">
+      Identifier of the agent submitting the feedback.
+    </ParamField>
+    <ParamField body="info.source_type" type="string">
+      Source of the correction, for example `"user_correction"`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Response
+
+<ResponseField name="code" type="number" required>
+  `200` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable status message.
+</ResponseField>
+
+<ResponseField name="data" type="object | null">
+  Present when `async_mode` is `"async"`. `null` when `async_mode` is `"sync"`.
+
+  <Expandable title="data object (async_mode: async)">
+    <ResponseField name="data.success" type="boolean">
+      Whether the feedback task was successfully enqueued.
+    </ResponseField>
+    <ResponseField name="data.task_id" type="string">
+      Unique identifier for the background task. Poll `GET /product/scheduler/status?user_id=<user_id>&task_id=<task_id>` to check completion.
+    </ResponseField>
+    <ResponseField name="data.status" type="string">
+      Initial task status, typically `"waiting"`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Correct a meeting location
+
+A user told the assistant their meeting was in Beijing, but later corrects this to Shanghai.
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/feedback \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "feedback_content": "The meeting location is Shanghai, not Beijing",
+    "history": [
+      {
+        "role": "user",
+        "content": "Where is my meeting next Friday?"
+      },
+      {
+        "role": "assistant",
+        "content": "Your meeting next Friday is in Beijing."
+      },
+      {
+        "role": "user",
+        "content": "That is wrong. The meeting is in Shanghai."
+      }
+    ],
+    "async_mode": "sync"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/feedback",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "feedback_content": "The meeting location is Shanghai, not Beijing",
+        "history": [
+            {
+                "role": "user",
+                "content": "Where is my meeting next Friday?",
+            },
+            {
+                "role": "assistant",
+                "content": "Your meeting next Friday is in Beijing.",
+            },
+            {
+                "role": "user",
+                "content": "That is wrong. The meeting is in Shanghai.",
+            },
+        ],
+        "async_mode": "sync",
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Feedback processed successfully",
+  "data": null
+}
+```
+
+### Asynchronous feedback with task polling
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/feedback \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "feedback_content": "I prefer tea, not coffee",
+    "history": [
+      {
+        "role": "user",
+        "content": "What do I like to drink?"
+      },
+      {
+        "role": "assistant",
+        "content": "You enjoy coffee."
+      },
+      {
+        "role": "user",
+        "content": "No, I prefer tea."
+      }
+    ],
+    "async_mode": "async"
+  }'
+```
+
+```python Python
+import requests
+import time
+
+# Submit feedback asynchronously
+feedback_resp = requests.post(
+    "http://localhost:8000/product/feedback",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "feedback_content": "I prefer tea, not coffee",
+        "history": [
+            {"role": "user", "content": "What do I like to drink?"},
+            {"role": "assistant", "content": "You enjoy coffee."},
+            {"role": "user", "content": "No, I prefer tea."},
+        ],
+        "async_mode": "async",
+    },
+)
+task_id = feedback_resp.json()["data"]["task_id"]
+
+# Poll until complete
+while True:
+    status_resp = requests.get(
+        "http://localhost:8000/product/scheduler/status",
+        params={
+            "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+            "task_id": task_id,
+        },
+    )
+    status = status_resp.json()["data"][0]["status"]
+    print(f"Task status: {status}")
+    if status in ("completed", "failed", "cancelled"):
+        break
+    time.sleep(1)
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Feedback processed successfully",
+  "data": {
+    "success": true,
+    "task_id": "f7e6d5c4-3b2a-1908-7654-321098fedcba",
+    "status": "waiting"
+  }
+}
+```
+
+## How feedback processing works
+
+When you submit feedback, MemOS runs the following steps:
+
+<Steps>
+  <Step title="Conflict detection">
+    MemOS searches the user's MemCubes for memories that contradict the feedback content, using semantic search over the `feedback_content` and `history` you provided.
+  </Step>
+  <Step title="Resolution">
+    Conflicting memories are updated or deactivated. A new memory reflecting the correction is created with a high confidence score.
+  </Step>
+  <Step title="Version tracking">
+    The original memory is preserved in version history. If `corrected_answer` is `true`, the updated response is included in the reply.
+  </Step>
+</Steps>
+
+<Tip>
+  For best results, include the full conversation turn that produced the incorrect response in the `history` field. The more context MemOS has, the more precisely it can identify which memory to update.
+</Tip>
+
+## Error responses
+
+| Code | Description |
+|------|-------------|
+| `400` | Malformed request body. |
+| `422` | Validation error — missing required fields or invalid parameter values. |
+| `500` | Internal error during feedback processing. |
+
+```json 422
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["body", "feedback_content"],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```

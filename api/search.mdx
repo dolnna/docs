@@ -1,0 +1,257 @@
+---
+title: 'Search memories — POST /product/search'
+description: 'Run a semantic search across one or more MemCubes and retrieve the most relevant text, action, and preference memories for a user.'
+---
+
+The Search endpoint performs semantic retrieval across the MemCubes you specify, ranking results by relevance to your query. MemOS uses embedding-based similarity together with an optional MMR deduplication pass to return a diverse set of high-confidence memories. Results are grouped by memory type — `text_mem` for factual and conversational memories, `act_mem` for action/tool memories, and `para_mem` for preference memories — so your application can consume each layer independently.
+
+## Endpoint
+
+```
+POST /product/search
+```
+
+## Request body
+
+<ParamField body="query" type="string" required>
+  Natural language query to search for, for example `"What does the user like to eat?"`.
+</ParamField>
+
+<ParamField body="user_id" type="string" required>
+  The unique identifier of the user whose memories you are searching.
+</ParamField>
+
+<ParamField body="readable_cube_ids" type="string[]" required>
+  List of MemCube IDs to search. You must have read access to each cube listed.
+</ParamField>
+
+<ParamField body="top_k" type="number" default="10">
+  Maximum number of text memories to return. Must be at least `1`. Default: `10`.
+</ParamField>
+
+<ParamField body="mode" type="string" default="fast">
+  Search mode. `"fast"` uses approximate nearest-neighbor lookup. `"fine"` runs a more thorough re-ranking pass at the cost of higher latency. `"mixture"` combines both.
+</ParamField>
+
+<ParamField body="relativity" type="number" default="0.45">
+  Minimum relevance score threshold. Memories with a `relativity` score below this value are excluded from results. Set to `0` to disable threshold filtering. Default: `0.45`.
+</ParamField>
+
+<ParamField body="dedup" type="string" default="mmr">
+  Deduplication strategy for text memories. `"mmr"` applies Maximal Marginal Relevance to maximize diversity. `"sim"` removes near-duplicate memories by cosine similarity. `"no"` disables deduplication. Default: `"mmr"`.
+</ParamField>
+
+<ParamField body="include_preference" type="boolean" default="true">
+  When `true`, preference memories relevant to the query are included in the response alongside general memories.
+</ParamField>
+
+<ParamField body="pref_top_k" type="number" default="6">
+  Maximum number of preference memories to return when `include_preference` is `true`.
+</ParamField>
+
+<ParamField body="session_id" type="string">
+  Optional session identifier used as a soft signal to weight results toward the current conversation context.
+</ParamField>
+
+<ParamField body="filter" type="object">
+  Structured filter applied to memory metadata before scoring. Supports `and` / `or` combinations.
+
+  <Expandable title="filter examples">
+    ```json
+    {
+      "and": [
+        { "created_at": { "gt": "2025-01-01" } },
+        { "tags": "travel" }
+      ]
+    }
+    ```
+  </Expandable>
+</ParamField>
+
+## Response
+
+<ResponseField name="code" type="number" required>
+  HTTP-style status code. `200` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Human-readable status message, for example `"Search completed successfully"`.
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  Search results grouped by memory type.
+
+  <Expandable title="data object">
+    <ResponseField name="data.text_mem" type="object[]">
+      List of MemCube result groups for text memories. Each entry corresponds to one MemCube.
+
+      <Expandable title="text_mem entry">
+        <ResponseField name="cube_id" type="string">
+          The MemCube ID this group of results was retrieved from.
+        </ResponseField>
+        <ResponseField name="memories" type="object[]">
+          Ranked list of matching memories.
+
+          <Expandable title="memory object">
+            <ResponseField name="id" type="string">
+              Unique memory identifier (UUID).
+            </ResponseField>
+            <ResponseField name="memory" type="string">
+              The extracted memory text.
+            </ResponseField>
+            <ResponseField name="ref_id" type="string">
+              Short reference identifier, for example `"[2f40be8f]"`.
+            </ResponseField>
+            <ResponseField name="metadata" type="object">
+              <Expandable title="metadata fields">
+                <ResponseField name="metadata.user_id" type="string">
+                  User this memory belongs to.
+                </ResponseField>
+                <ResponseField name="metadata.session_id" type="string">
+                  Session the memory was created in.
+                </ResponseField>
+                <ResponseField name="metadata.type" type="string">
+                  Semantic type of the memory, for example `"fact"` or `"preference"`.
+                </ResponseField>
+                <ResponseField name="metadata.memory_type" type="string">
+                  Internal memory class, for example `"UserMemory"`.
+                </ResponseField>
+                <ResponseField name="metadata.confidence" type="number">
+                  Model confidence score between `0` and `1`.
+                </ResponseField>
+                <ResponseField name="metadata.relativity" type="number">
+                  Relevance score to the search query.
+                </ResponseField>
+                <ResponseField name="metadata.tags" type="string[]">
+                  Tags attached to the memory.
+                </ResponseField>
+                <ResponseField name="metadata.status" type="string">
+                  Activation status, for example `"activated"`.
+                </ResponseField>
+                <ResponseField name="metadata.key" type="string">
+                  Short descriptive key for the memory.
+                </ResponseField>
+                <ResponseField name="metadata.background" type="string">
+                  Context sentence describing why this memory was created.
+                </ResponseField>
+                <ResponseField name="metadata.created_at" type="string">
+                  ISO 8601 timestamp when the memory was created.
+                </ResponseField>
+                <ResponseField name="metadata.updated_at" type="string">
+                  ISO 8601 timestamp when the memory was last updated.
+                </ResponseField>
+              </Expandable>
+            </ResponseField>
+          </Expandable>
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="data.act_mem" type="object[]">
+      Results for action and tool-use memories. Same structure as `text_mem`.
+    </ResponseField>
+
+    <ResponseField name="data.para_mem" type="object[]">
+      Results for parametric/preference memories. Same structure as `text_mem`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/search \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "query": "What do I like to eat?",
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "top_k": 5
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/search",
+    json={
+        "query": "What do I like to eat?",
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "top_k": 5,
+    },
+)
+data = response.json()
+for cube in data["data"]["text_mem"]:
+    for memory in cube["memories"]:
+        print(memory["memory"], "—", memory["metadata"]["confidence"])
+```
+
+</CodeGroup>
+
+**Response**
+
+```json 200
+{
+  "code": 200,
+  "message": "Search completed successfully",
+  "data": {
+    "text_mem": [
+      {
+        "cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+        "memories": [
+          {
+            "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+            "memory": "[user opinion] User likes strawberries.",
+            "ref_id": "[2f40be8f]",
+            "metadata": {
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "session_id": "root_session",
+              "status": "activated",
+              "type": "fact",
+              "key": "User's preference for strawberries",
+              "confidence": 0.99,
+              "tags": ["preference", "strawberries"],
+              "memory_type": "UserMemory",
+              "relativity": 0.6349761312470591,
+              "background": "User expressed a preference for strawberries, indicating a tendency in dietary preferences.",
+              "created_at": "2025-09-18T08:23:44.625511+00:00",
+              "updated_at": "2025-09-18T08:23:44.625479+00:00",
+              "sources": [],
+              "source": null,
+              "visibility": null
+            }
+          }
+        ]
+      }
+    ],
+    "act_mem": [],
+    "para_mem": []
+  }
+}
+```
+
+## Error responses
+
+| Code | Description |
+|------|-------------|
+| `400` | Malformed request body. |
+| `422` | Validation error — missing required fields or invalid parameter values. |
+| `500` | Internal error during search execution. |
+
+```json 422
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["body", "query"],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```

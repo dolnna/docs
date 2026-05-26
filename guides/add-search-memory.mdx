@@ -1,0 +1,230 @@
+---
+title: "Add and Search Memory with MemOS"
+description: "Learn how to store conversation messages as memories and retrieve them later with semantic search using the MemOS REST API and Python SDK."
+---
+
+The `POST /product/add` and `POST /product/search` endpoints are the foundation of every MemOS integration. You send conversation messages to be stored as memories, then query them by meaning — not just keywords — to retrieve the most relevant context for your AI agent or chatbot.
+
+## Prerequisites
+
+- A running MemOS instance (cloud or self-hosted)
+- A `user_id` to associate memories with — use a UUID, such as the ID from your own user database
+- A `cube_id` to scope memories to — use a descriptive string like `"user-abc123-personal"`
+
+<Tip>
+  Use UUIDs for both `user_id` and `cube_id` in production to avoid collisions. For local testing, short readable strings like `"test_user_1"` and `"cube_test_user_1"` work fine.
+</Tip>
+
+## Add memories from a conversation
+
+MemOS accepts conversations in standard OpenAI message format. When you POST a conversation, MemOS processes the messages, extracts meaningful facts, and stores them in the specified cube.
+
+<Steps>
+  <Step title="Build the add request">
+    Assemble your request body with the user ID, target cube, messages, and execution mode.
+
+    | Field | Type | Description |
+    | --- | --- | --- |
+    | `user_id` | string | Identifies whose memory this belongs to. |
+    | `writable_cube_ids` | string[] | One or more MemCube IDs to write memories into. |
+    | `messages` | object[] | Conversation turns in OpenAI format — each with `role` and `content`. |
+    | `async_mode` | string | `"sync"` waits for the operation to complete; `"async"` enqueues it and returns a task ID immediately. |
+
+  </Step>
+  <Step title="Send the request">
+
+    <CodeGroup>
+
+    ```bash curl
+    curl -X POST https://your-memos-host/product/add \
+      -H "Content-Type: application/json" \
+      -d '{
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "messages": [
+          {
+            "role": "user",
+            "content": "I have a trip to Tokyo planned for next month. What sushi restaurants do you recommend?"
+          },
+          {
+            "role": "assistant",
+            "content": "For sushi in Tokyo, consider Sukiyabashi Jiro in Ginza or Sushi Saito in Minato — both are world-renowned. Ichizushi in Shibuya is a great mid-range option."
+          },
+          {
+            "role": "user",
+            "content": "I prefer omakase-style dining and I do not eat shellfish."
+          },
+          {
+            "role": "assistant",
+            "content": "Noted! Both Jiro and Saito specialize in omakase, and you can request no shellfish when you make a reservation."
+          }
+        ],
+        "async_mode": "sync"
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    response = requests.post(
+        "https://your-memos-host/product/add",
+        json={
+            "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "I have a trip to Tokyo planned for next month. What sushi restaurants do you recommend?"
+                },
+                {
+                    "role": "assistant",
+                    "content": "For sushi in Tokyo, consider Sukiyabashi Jiro in Ginza or Sushi Saito in Minato — both are world-renowned. Ichizushi in Shibuya is a great mid-range option."
+                },
+                {
+                    "role": "user",
+                    "content": "I prefer omakase-style dining and I do not eat shellfish."
+                },
+                {
+                    "role": "assistant",
+                    "content": "Noted! Both Jiro and Saito specialize in omakase, and you can request no shellfish when you make a reservation."
+                }
+            ],
+            "async_mode": "sync",
+        },
+    )
+    print(response.json())
+    ```
+
+    </CodeGroup>
+
+  </Step>
+  <Step title="Inspect the response">
+    A successful sync add returns a `MemoryResponse` with a `200` code:
+
+    ```json
+    {
+      "code": 200,
+      "message": "Memory added successfully",
+      "data": []
+    }
+    ```
+
+    If you use `async_mode: "async"`, the response includes a `task_id` you can poll using `GET /product/scheduler/status`.
+  </Step>
+</Steps>
+
+<Note>
+  Use `async_mode: "sync"` while developing and testing so you can immediately search what you just stored. Switch to `async_mode: "async"` in production for non-blocking, high-throughput ingestion.
+</Note>
+
+## Search stored memories
+
+Once memories are stored, you can retrieve the most relevant ones using a natural-language query. MemOS uses semantic vector search — you do not need to match exact keywords.
+
+<Steps>
+  <Step title="Build the search request">
+
+    | Field | Type | Description |
+    | --- | --- | --- |
+    | `query` | string | The question or topic you want memories about. |
+    | `user_id` | string | The user whose memories to search. |
+    | `readable_cube_ids` | string[] | One or more MemCube IDs to search across. |
+    | `top_k` | integer | Maximum number of memories to return. Defaults to `10`. |
+
+  </Step>
+  <Step title="Send the request">
+
+    <CodeGroup>
+
+    ```bash curl
+    curl -X POST https://your-memos-host/product/search \
+      -H "Content-Type: application/json" \
+      -d '{
+        "query": "What does this user like to eat?",
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "top_k": 10
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    response = requests.post(
+        "https://your-memos-host/product/search",
+        json={
+            "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "query": "What does this user like to eat?",
+            "top_k": 10,
+        },
+    )
+    data = response.json()
+    for cube in data["data"]["text_mem"]:
+        for memory in cube["memories"]:
+            print(memory["memory"], "—", memory["metadata"]["relativity"])
+    ```
+
+    </CodeGroup>
+
+  </Step>
+  <Step title="Read the response">
+    The response contains a `data` object with a `text_mem` array. Each entry represents one MemCube and contains a list of matched memories:
+
+    ```json
+    {
+      "code": 200,
+      "message": "Search memories successfully",
+      "data": {
+        "text_mem": [
+          {
+            "cube_id": "cube-a1b2c3d4-personal",
+            "memories": [
+              {
+                "id": "mem-uuid-001",
+                "memory": "User prefers omakase-style sushi dining.",
+                "metadata": {
+                  "memory_type": "UserMemory",
+                  "relativity": 0.91,
+                  "created_at": "2025-05-20T14:32:00Z"
+                }
+              },
+              {
+                "id": "mem-uuid-002",
+                "memory": "User does not eat shellfish.",
+                "metadata": {
+                  "memory_type": "PreferenceMemory",
+                  "relativity": 0.87,
+                  "created_at": "2025-05-20T14:32:00Z"
+                }
+              },
+              {
+                "id": "mem-uuid-003",
+                "memory": "User is planning a trip to Tokyo next month.",
+                "metadata": {
+                  "memory_type": "WorkingMemory",
+                  "relativity": 0.74,
+                  "created_at": "2025-05-20T14:32:00Z"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+    ```
+
+    Each memory item includes a `relativity` score between 0 and 1 — higher values indicate stronger relevance to your query. By default, only memories with `relativity >= 0.45` are returned.
+
+  </Step>
+</Steps>
+
+<Tip>
+  Pass the returned `memory` strings directly into your LLM's system prompt as context. The `id` field is useful if you later want to correct a specific memory with the feedback endpoint.
+</Tip>
+
+## Next steps
+
+- [Chat with memory-augmented responses](/guides/chat-with-memory) — let MemOS handle retrieval and injection automatically during chat
+- [Correct memories with feedback](/guides/feedback-correction) — fix wrong facts without deleting history
+- [Search across multiple cubes](/guides/multi-cube) — scope queries to personal and shared knowledge spaces

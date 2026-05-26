@@ -1,0 +1,192 @@
+---
+title: "通过反馈纠正和改进记忆"
+description: "使用 MemOS 反馈端点修复错误事实、更新偏好和强化记忆 —— 不会永久销毁原始记录。"
+---
+
+长期运行的 AI Agent 会随时间积累记忆，而其中一些记忆会出错。用户可能会更正记错的事实、更新偏好或重命名项目。`POST /product/feedback` 端点处理这些更正：您以消息形式提供自然语言更正，MemOS 定位冲突的记忆，归档旧版本，并写入更正后的版本。
+
+反馈是非破坏性的。MemOS 归档被替换的记忆而不是删除它们，因此您的系统保留可在需要时审计或恢复的版本历史。
+
+## 反馈可以修复什么
+
+MemOS 自动识别四类反馈：
+
+| 类别 | 示例 | 发生的操作 |
+| --- | --- | --- |
+| **更正** | "不对，会议在上海，不是北京。" | 旧记忆被归档；写入新的更正记忆。 |
+| **追加** | "另外，我是素食主义者。" | 新记忆被添加，不影响现有记忆。 |
+| **关键词替换** | "把所有 'Project Alpha' 改成 'Project Vega'。" | 所有受影响的记忆被定位并批量更新。 |
+| **偏好演变** | "我现在开始喝咖啡了。" | 现有偏好用新上下文更新。 |
+
+## 发送反馈更正
+
+<Steps>
+  <Step title="构建请求">
+
+    | 字段 | 类型 | 描述 |
+    | --- | --- | --- |
+    | `user_id` | string | 要更正其记忆的用户。 |
+    | `writable_cube_ids` | string[] | 要应用更正的 MemCube。 |
+    | `history` | object[] | 导致此次更正的对话历史 —— 帮助 MemOS 理解上下文。 |
+    | `feedback_content` | string | 更正本身，以自然语言表达。 |
+    | `retrieved_memory_ids` | string[] | 可选。上一轮检索到的记忆 ID。提供这些可为 MemOS 给出精确目标，从而加速更正。 |
+    | `async_mode` | string | `"sync"` 等待更正完成；`"async"` 立即返回任务 ID。 |
+
+  </Step>
+  <Step title="发送请求">
+
+    假设之前的搜索返回了一条记忆"用户的会议在北京" —— 但用户更正了它：
+
+    <CodeGroup>
+
+    ```bash curl
+    curl -X POST https://your-memos-host/product/feedback \
+      -H "Content-Type: application/json" \
+      -d '{
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "history": [
+          {
+            "role": "user",
+            "content": "Where is my team meeting this Friday?"
+          },
+          {
+            "role": "assistant",
+            "content": "Your team meeting this Friday is scheduled in Beijing."
+          }
+        ],
+        "feedback_content": "That is wrong — the meeting is in Shanghai, not Beijing.",
+        "retrieved_memory_ids": ["mem-uuid-beijing-001"],
+        "async_mode": "sync"
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    response = requests.post(
+        "https://your-memos-host/product/feedback",
+        json={
+            "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "history": [
+                {
+                    "role": "user",
+                    "content": "Where is my team meeting this Friday?"
+                },
+                {
+                    "role": "assistant",
+                    "content": "Your team meeting this Friday is scheduled in Beijing."
+                }
+            ],
+            "feedback_content": "That is wrong — the meeting is in Shanghai, not Beijing.",
+            "retrieved_memory_ids": ["mem-uuid-beijing-001"],
+            "async_mode": "sync",
+        }
+    )
+
+    print(response.json())
+    ```
+
+    </CodeGroup>
+
+  </Step>
+  <Step title="读取响应">
+    成功的反馈更正返回更新后的记忆状态：
+
+    ```json
+    {
+      "code": 200,
+      "message": "Feedback processed successfully",
+      "data": [
+        {
+          "action": "update",
+          "old_memory_id": "mem-uuid-beijing-001",
+          "new_memory_id": "mem-uuid-shanghai-002",
+          "memory": "User's team meeting this Friday is in Shanghai."
+        }
+      ]
+    }
+    ```
+
+    `action` 字段告诉您 MemOS 做了什么：`"update"` 表示旧记忆已归档并被替换；`"add"` 表示无冲突地附加了一条新记忆。
+  </Step>
+</Steps>
+
+<Tip>
+  当您有 `retrieved_memory_ids` 时，请始终传递它们。如果省略，MemOS 会执行一次额外的搜索来定位目标记忆 —— 这比直接指向已知记忆 ID 更慢、更不精确。
+</Tip>
+
+## 替代方案：将 add 请求作为反馈路由
+
+如果您的应用已经使用 `POST /product/add` 且想要将某次 add 标记为更正而非新记忆，请在 add 请求上设置 `is_feedback: true`：
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://your-memos-host/product/add \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+    "messages": [
+      {
+        "role": "user",
+        "content": "My phone number has changed to +1 555-0199."
+      }
+    ],
+    "async_mode": "sync",
+    "is_feedback": true
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "https://your-memos-host/product/add",
+    json={
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "messages": [
+            {
+                "role": "user",
+                "content": "My phone number has changed to +1 555-0199."
+            }
+        ],
+        "async_mode": "sync",
+        "is_feedback": True,
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+当 `is_feedback` 为 `true` 时，add 处理器会将请求路由到与专用反馈端点相同的更正流水线 —— 查找冲突的记忆，如发现则归档。
+
+## MemOS 如何处理一次更正
+
+收到反馈请求时，MemOS 会运行一个五步流水线：
+
+1. **识别意图** —— 判断反馈是更正、追加、关键词替换还是偏好更新。
+2. **定位目标** —— 如果您传递了 `retrieved_memory_ids`，目标已知。否则，MemOS 在 cube 中搜索可能的候选记忆。
+3. **比对** —— LLM 将新信息与现有记忆比对，决定是归档并替换 (`UPDATE`) 还是仅追加 (`ADD`)。
+4. **安全检查** —— MemOS 在写入之前验证拟议的更改 —— 确认 ID 正确且编辑范围合理。
+5. **写入** —— 旧记忆被打上状态标记并归档；更正后的记忆作为新节点写入。两者都保留在数据库中。
+
+<Note>
+  归档的记忆是软删除 —— 它们不再出现在搜索结果中，但保留在图数据库中。这为用户记忆随时间的演化提供了完整的审计轨迹。
+</Note>
+
+## 用例
+
+- **更正错误事实**：你把我的生日记成了 3 月 5 日 —— 其实是 3 月 15 日。
+- **更新偏好**：我不再喝酒了，请记住这一点。
+- **重命名实体**：我们现在称这个产品为 'Horizon'，不再是 'Atlas'。
+- **强化正确记忆**：完全正确 —— 我坐飞机时确实更喜欢靠窗座位。
+
+## 下一步
+
+- [添加和搜索记忆](/cn/guides/add-search-memory) —— 存储反馈日后会改进的初始记忆
+- [使用带记忆增强的响应进行对话](/cn/guides/chat-with-memory) —— 在对话中自动公开更正后的记忆

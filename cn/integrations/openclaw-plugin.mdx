@@ -1,0 +1,205 @@
+---
+title: "使用 MemOS 为 OpenClaw 添加持久记忆"
+description: "为您的 OpenClaw Agent 提供持久化、可搜索的记忆，并通过 MemOS 云端或本地插件最多减少 72% 的 Token 消耗。"
+---
+
+OpenClaw Agent 消耗 Token 很快 —— 每次新对话都会重新注入完整历史、全局记忆和每日日志，无论它们是否相关。MemOS OpenClaw 插件以精准检索取代该模式：MemOS 在外部存储您的记忆，每次任务仅注入 3–5 条最相关的项目，无论您的 Agent 运行多久，上下文都保持在 2000–3000 Token 之下。
+
+## 选择您的插件
+
+MemOS 为 OpenClaw 提供两种插件选项。如果您想要最快的设置和跨设备记忆共享，使用云插件。如果您需要完全的数据隐私且一切都存储在您的机器上，使用本地插件。
+
+| | 云端插件 | 本地插件 |
+|---|---|---|
+| **存储** | MemOS 云端 | 您机器上的 SQLite |
+| **设置** | 只需 API 密钥 | 单行安装命令 |
+| **跨设备** | 是 | 仅 LAN/VPN 共享 |
+| **隐私** | 云托管 | 100% 本机 |
+| **记忆层** | 结构化 + 去重 | L1–L3 + 结晶化技能 |
+| **最适合** | 快速上手、团队 | 隐私、可观测性 |
+
+---
+
+## 云端插件
+
+云端插件将您的记忆存储在 MemOS 云端。只需一个 API 密钥即可开始。
+
+<Steps>
+  <Step title="安装 OpenClaw">
+    在添加插件之前，请确保您已安装并初始化 OpenClaw。
+
+    ```bash
+    npm install -g openclaw@latest
+    openclaw onboard
+    ```
+  </Step>
+
+  <Step title="获取您的 API 密钥">
+    登录 [MemOS 云端控制台](https://memos-dashboard.openmem.net/apikeys/) 并创建一个 API 密钥。您的密钥以 `mpg-` 开头。
+  </Step>
+
+  <Step title="配置 API 密钥">
+    将您的密钥添加到 OpenClaw 的环境文件。插件按优先顺序读取 env 文件：`~/.openclaw/.env`，然后 `~/.moltbot/.env`，然后 `~/.clawdbot/.env`，最后是进程环境。
+
+    <Tabs>
+      <Tab title="macOS / Linux">
+        ```bash
+        echo 'MEMOS_API_KEY=mpg-...' >> ~/.openclaw/.env
+        ```
+      </Tab>
+      <Tab title="Windows PowerShell">
+        ```powershell
+        [System.Environment]::SetEnvironmentVariable("MEMOS_API_KEY", "mpg-...", "User")
+        ```
+      </Tab>
+    </Tabs>
+
+    最小的 `.env` 条目是：
+
+    ```env
+    MEMOS_API_KEY=mpg-your-key-here
+    ```
+  </Step>
+
+  <Step title="安装插件">
+    <Tabs>
+      <Tab title="npm（推荐）">
+        ```bash
+        openclaw plugins install @memtensor/memos-cloud-openclaw-plugin@latest
+        openclaw gateway restart
+        ```
+      </Tab>
+      <Tab title="手动安装（Windows 备用方案）">
+        如果您在 Windows 上遇到 `Error: spawn EINVAL`，请改用手动路径：
+
+        1. 从 [npm](https://www.npmjs.com/package/@memtensor/memos-cloud-openclaw-plugin) 下载最新的 `.tgz`。
+        2. 解压到 `%USERPROFILE%\.openclaw\extensions\memos-cloud-openclaw-plugin`。
+        3. 更新 `~/.openclaw/openclaw.json` 以包含解压后的路径：
+
+        ```json
+        {
+          "plugins": {
+            "entries": {
+              "memos-cloud-openclaw-plugin": { "enabled": true }
+            },
+            "load": {
+              "paths": [
+                "C:\\Users\\YourName\\.openclaw\\extensions\\memos-cloud-openclaw-plugin\\package"
+              ]
+            }
+          }
+        }
+        ```
+
+        保存后重启网关。
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="验证插件已启用">
+    确认 `~/.openclaw/openclaw.json` 包含插件条目：
+
+    ```json
+    {
+      "plugins": {
+        "entries": {
+          "memos-cloud-openclaw-plugin": { "enabled": true }
+        }
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+### 更新云端插件
+
+每当有新版本可用时运行此命令：
+
+```bash
+openclaw plugins update @memtensor/memos-cloud-openclaw-plugin@latest
+openclaw gateway restart
+```
+
+---
+
+## 本地插件
+
+本地插件使用 SQLite 将所有记忆数据保留在您的机器上。它也使用相同的记忆核心支持 Hermes Agent。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MemTensor/MemOS/main/apps/memos-local-plugin/install.sh | bash
+```
+
+安装程序会检测是否安装了 OpenClaw 和/或 Hermes，并自动配置插件。安装后，在 `http://127.0.0.1:18799` 打开 Memory Viewer 以配置您的嵌入模型和 LLM 设置。
+
+<Note>
+  不要直接使用 `npm install` 安装本地插件。安装脚本处理 Agent 检测、目录布局、配置初始化和运行时重启。
+</Note>
+
+有关本地插件的完整设置说明（包括 Hermes Agent 支持和 Memory Viewer 配置），请参阅 [使用 MemOS 本地插件为 Hermes Agent 提供记忆](/cn/integrations/hermes-plugin)。
+
+---
+
+## 高级：多 Agent 配置
+
+云端插件支持按 Agent 隔离记忆和自定义检索参数。在您的 `openclaw.json` 中启用多 Agent 模式：
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "memos-cloud-openclaw-plugin": {
+        "enabled": true,
+        "config": {
+          "multiAgentMode": true,
+          "allowedAgents": ["research-agent", "coding-agent"],
+          "memoryLimitNumber": 6,
+          "relativity": 0.45,
+          "agentOverrides": {
+            "research-agent": {
+              "knowledgebaseIds": ["kb-research-papers"],
+              "memoryLimitNumber": 12,
+              "relativity": 0.3
+            },
+            "coding-agent": {
+              "knowledgebaseIds": ["kb-codebase"],
+              "memoryLimitNumber": 9,
+              "addEnabled": false
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+<Tip>
+  将 `allowedAgents` 设为明确列表，以避免为不需要记忆的 Agent 消耗 Token 预算。如果列表为空或省略，则所有 Agent 都使用记忆检索。
+</Tip>
+
+当 `multiAgentMode` 为 `true` 时，插件从每个对话中读取 `ctx.agentId` 并按 Agent 隔离记忆的读写。默认的 `"main"` Agent ID 不在隔离范围内，以保持与现有记忆数据的向后兼容性。
+
+---
+
+## 可视化配置 UI
+
+从 `v0.1.12` 版本开始，云端插件包含一个本地配置 UI。一旦插件加载且网关就绪，它会自动在 `http://127.0.0.1:38463` 启动 Config UI。在浏览器中打开该 URL，无需重启服务即可编辑知识库 ID、检索参数和多 Agent 规则。
+
+---
+
+## 测试您的配置
+
+与您的 OpenClaw Agent 开始一段对话，并分享一个偏好：
+
+```
+First conversation:
+  "My favourite programming language is Python."
+  "I'm working on an e-commerce project."
+
+Second conversation (new session):
+  "Which programming language do I prefer?"
+  "What project am I working on?"
+```
+
+OpenClaw 从 MemOS 检索相关记忆并准确作答 —— 无需重新加载完整对话历史。

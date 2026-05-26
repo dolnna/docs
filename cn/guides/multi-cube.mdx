@@ -1,0 +1,217 @@
+---
+title: "使用 MemCube 管理多个记忆空间"
+description: "在多个 MemCube 之间隔离、组合和查询，以将用户特定记忆与共享知识分开，或保持 Agent 上下文相互独立。"
+---
+
+MemCube 是一个由 `cube_id` 标识的有作用域的记忆容器。每个用户、项目、团队或 Agent 都可以拥有自己的 cube —— 而一次 API 调用可以同时从多个 cube 读取或向多个 cube 写入。这让您可以在不重复数据的情况下组合记忆空间：一个用于用户特定事实的个人 cube、一个用于共享知识的团队 cube，并在一次请求中一起搜索两者。
+
+## cube 作用域的工作方式
+
+每个 `add` 和 `search` 请求都接受 cube 列表，而不是单个 cube：
+
+- **`writable_cube_ids`** —— 从您的消息中提取的记忆被并行写入所有列出的 cube。
+- **`readable_cube_ids`** —— 搜索结果从所有列出的 cube 中汇集并一起返回，每个结果都带有 `cube_id`，以便您知道其来源。
+
+您在每次请求中独立选择从哪些 cube 读取以及向哪些 cube 写入。例如，一个聊天 Agent 可能从 `user-cube` 和 `team-cube` 都读取，但只向 `user-cube` 写入新记忆。
+
+## 跨多个 cube 搜索
+
+以下示例在一次请求中搜索两个 cube —— 一个个人 cube 和一个共享团队 cube：
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://your-memos-host/product/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "project deadlines",
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "readable_cube_ids": [
+      "cube-a1b2c3d4-personal",
+      "cube-team-engineering-shared"
+    ],
+    "top_k": 5
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "https://your-memos-host/product/search",
+    json={
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "readable_cube_ids": [
+            "cube-a1b2c3d4-personal",
+            "cube-team-engineering-shared",
+        ],
+        "query": "project deadlines",
+        "top_k": 5,
+    },
+)
+data = response.json()
+for cube in data["data"]["text_mem"]:
+    print(f"From cube: {cube['cube_id']}")
+    for memory in cube["memories"]:
+        print(" -", memory["memory"])
+```
+
+</CodeGroup>
+
+响应按来源 cube 分组结果，使您能清楚地看到每条记忆来自哪里：
+
+```json
+{
+  "code": 200,
+  "message": "Search memories successfully",
+  "data": {
+    "text_mem": [
+      {
+        "cube_id": "cube-a1b2c3d4-personal",
+        "memories": [
+          {
+            "id": "mem-uuid-101",
+            "memory": "User committed to finishing the API integration by end of Q2.",
+            "metadata": {
+              "memory_type": "WorkingMemory",
+              "relativity": 0.88
+            }
+          }
+        ]
+      },
+      {
+        "cube_id": "cube-team-engineering-shared",
+        "memories": [
+          {
+            "id": "mem-uuid-202",
+            "memory": "Engineering team deadline for the v2.0 release is June 30.",
+            "metadata": {
+              "memory_type": "LongTermMemory",
+              "relativity": 0.92
+            }
+          },
+          {
+            "id": "mem-uuid-203",
+            "memory": "Design review for the dashboard feature is scheduled for June 10.",
+            "metadata": {
+              "memory_type": "LongTermMemory",
+              "relativity": 0.79
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## 并行写入多个 cube
+
+要在两个 cube 中同时存储相同的对话 —— 例如，同时写入用户的个人 cube 和特定项目的 cube —— 在 `writable_cube_ids` 中列出两者：
+
+<CodeGroup>
+
+```bash curl
+curl -X POST https://your-memos-host/product/add \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "writable_cube_ids": [
+      "cube-a1b2c3d4-personal",
+      "cube-project-horizon"
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "content": "We agreed in the sync today that the launch date is July 15."
+      },
+      {
+        "role": "assistant",
+        "content": "Noted — July 15 is confirmed as the Project Horizon launch date."
+      }
+    ],
+    "async_mode": "sync"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "https://your-memos-host/product/add",
+    json={
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "writable_cube_ids": [
+            "cube-a1b2c3d4-personal",
+            "cube-project-horizon",
+        ],
+        "messages": [
+            {
+                "role": "user",
+                "content": "We agreed in the sync today that the launch date is July 15."
+            },
+            {
+                "role": "assistant",
+                "content": "Noted — July 15 is confirmed as the Project Horizon launch date."
+            }
+        ],
+        "async_mode": "sync",
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+MemOS 并行向所有列出的 cube 写入 —— 总延迟与写入单个 cube 相同。
+
+## 常见模式
+
+### 用户特定记忆 + 共享团队知识
+
+为每个用户提供他们自己的 cube，用于存储个人偏好和历史。为团队范围的知识（操作手册、产品事实、FAQ）创建单独的共享 cube。当用户提问时，搜索两者：
+
+```json
+{
+  "readable_cube_ids": ["cube-user-alice", "cube-team-product"],
+  "writable_cube_ids": ["cube-user-alice"]
+}
+```
+
+由对话生成的新记忆进入 Alice 的个人 cube，而共享团队 cube 从 Alice 的角度看是只读的。
+
+### Agent 隔离
+
+为每个 Agent 实例提供它自己的 cube，以防止一个 Agent 累积的上下文污染另一个 Agent。当 Agent 需要与兄弟 Agent 共享知识时，从公共 cube 读取：
+
+```json
+{
+  "readable_cube_ids": ["cube-agent-42-session", "cube-shared-domain-knowledge"],
+  "writable_cube_ids": ["cube-agent-42-session"]
+}
+```
+
+### 多项目上下文
+
+跨多个项目工作的用户可以为每个项目设置一个 cube，外加一个个人 cube。当他们询问特定项目时，仅包含该项目的 cube 与他们的个人 cube：
+
+```json
+{
+  "readable_cube_ids": ["cube-user-bob", "cube-project-vega"],
+  "writable_cube_ids": ["cube-user-bob", "cube-project-vega"]
+}
+```
+
+## 在结果中识别记忆来源
+
+由于多 cube 搜索按 `cube_id` 分组返回结果，您可以向用户显示记忆的来源，或对不同 cube 应用不同的信任级别。`cube_id` 字段出现在 `text_mem` 数组的分组级别 —— 遍历分组以检查每个 cube 的结果。
+
+<Tip>
+  保持 cube ID 一致且具有描述性。`"{owner-id}-{purpose}"` 这样的格式 —— 例如 `"alice-personal"` 或 `"team-engineering-shared"` —— 可以让人一眼看出 cube 的归属。
+</Tip>
+
+## 下一步
+
+- [添加和搜索记忆](/cn/guides/add-search-memory) —— 使用单个 cube 工作的基础
+- [使用带记忆增强的响应进行对话](/cn/guides/chat-with-memory) —— 在聊天请求中也使用 `readable_cube_ids` 和 `writable_cube_ids`
+- [通过 MCP 连接 AI 助手](/cn/guides/mcp-integration) —— 将多 cube 记忆暴露给 Claude Desktop 或 Cursor 等工具

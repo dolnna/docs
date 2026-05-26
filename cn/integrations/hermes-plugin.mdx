@@ -1,0 +1,146 @@
+---
+title: "使用 MemOS 本地插件为 Hermes Agent 提供记忆"
+description: "安装 MemOS 本地插件，让 Hermes Agent 拥有自演化的本机记忆，包含四层结构、三层检索和内置的 Memory Viewer。"
+---
+
+`@memtensor/memos-local-plugin` 为 Hermes Agent 带来持久化、自演化的记忆，且不会向云端发送任何数据。所有内容 —— 对话轨迹、归纳的策略、世界模型知识、结晶化的技能 —— 都存储在您机器上的 SQLite 中。同一插件核心在同一台机器上也支持 OpenClaw，但每个 Agent 都保持自己独立的数据库和 Memory Viewer。
+
+## 记忆如何演化
+
+插件捕获您的 Agent 所做的事并跨任务在其基础上构建：
+
+| 层 | 存储内容 | 如何创建 |
+|---|---|---|
+| **L1 轨迹 (Trace)** | 逐步执行记录 | 每个任务后自动捕获 |
+| **L2 策略 (Policy)** | 跨任务的策略和模式 | 从相似的轨迹中归纳 |
+| **L3 世界模型 (World Model)** | 压缩的环境知识 | 由策略汇总而成 |
+| **技能 (Skill)** | 可调用的可复用能力 | 由高价值策略结晶化形成 |
+
+在每个任务之前，插件从所有四层检索相关上下文并将其注入 Hermes。任务后，工具结果和反馈更新记忆价值并推动进一步演化。Agent 会随着时间在熟悉的任务类型上变得更擅长。
+
+---
+
+## 安装
+
+在 macOS 或 Linux 上运行一行安装命令。它会自动检测安装了哪些 Agent 并为每个 Agent 进行配置：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MemTensor/MemOS/main/apps/memos-local-plugin/install.sh | bash
+```
+
+<Warning>
+  不要将 `npm install @memtensor/memos-local-plugin` 作为主要安装方式直接使用。安装脚本会自动处理 Agent 检测、目录布局、配置初始化和运行时重启。
+</Warning>
+
+在交互式终端中，安装程序会询问要为哪个 Agent 安装。在非交互式环境（CI、脚本）中，它会为所有检测到的 Agent 安装。
+
+安装后，您的 Hermes 插件文件和数据组织如下：
+
+| 路径 | 内容 |
+|---|---|
+| `~/.hermes/plugins/memos-local-plugin/` | 插件代码 |
+| `~/.hermes/memos-plugin/` | SQLite 数据、技能、日志、配置 |
+| `http://127.0.0.1:18800` | Memory Viewer |
+
+要升级插件，再次运行相同的安装命令。升级过程中不会删除您现有的数据、技能包和日志。
+
+---
+
+## 在 Memory Viewer 中配置模型
+
+<Steps>
+  <Step title="打开 Memory Viewer">
+    安装后，在浏览器中打开 `http://127.0.0.1:18800`。这是 Hermes 的专用查看器 —— 它与端口 `18799` 上的 OpenClaw 查看器分开运行。
+  </Step>
+
+  <Step title="配置 AI 模型">
+    转到 **Settings → AI Models** 并配置：
+    - **嵌入模型** —— 用于向量检索。接受兼容 OpenAI 的提供商、Gemini、Cohere、Voyage 和 Mistral，以及本地默认设置。
+    - **LLM** —— 用于策略归纳和技能演化器。输入您的提供商 API 密钥和基础 URL。
+    - **技能演化器** —— 可以使用相同或不同的 LLM。
+
+    在保存前使用 **Test** 按钮确认每个模型都能成功连接。
+  </Step>
+
+  <Step title="保存并重启">
+    保存后，Viewer 会重启插件并加载新配置。无需手动重启服务。
+  </Step>
+</Steps>
+
+---
+
+## 启动带记忆的 Hermes
+
+安装并配置模型后，正常启动 Hermes：
+
+```bash
+hermes chat
+```
+
+插件在 Hermes 构建提示之前拦截每个轮次。它在技能、轨迹/情节和世界模型之间运行三层检索，然后注入相关上下文。轮次结束后，它将对话、工具调用、观察和反馈写入本地记忆。
+
+<Note>
+  如果 Hermes 机器无法运行 Node.js，提供商会报告为不可用，Hermes 退回到其内置的内存模式。
+</Note>
+
+---
+
+## 验证记忆是否正常工作
+
+在 `http://127.0.0.1:18800` 打开 Memory Viewer，并在运行几个任务后检查每个部分：
+
+| Viewer 部分 | 检查内容 |
+|---|---|
+| **Overview** | 核心状态、版本和实时事件流 |
+| **Memories** | 作为 L1 轨迹捕获的对话和工具步骤 |
+| **Tasks / Policies** | 跨任务模式如何被归纳 |
+| **World Models** | 随时间构建的压缩环境知识 |
+| **Skills** | 结晶化的能力及其生命周期状态 |
+| **Analytics** | 检索命中率和记忆价值评分 |
+| **Logs** | 用于调试的详细执行日志 |
+
+---
+
+## 三层检索
+
+当 Hermes 启动一个任务时，检索器同时跨三层搜索，并使用 RRF + MMR 组合结果以获得相关性和多样性：
+
+1. **技能层** —— 首先搜索可调用的技能；匹配的技能注入开箱即用的指导。
+2. **轨迹/情节层** —— 使用向量、FTS5、关键字模式和错误签名通道搜索类似任务的过去执行记录。
+3. **世界模型层** —— 查询压缩的环境知识（项目结构、约束、已知行为）。
+
+这种多通道方法既能为 Hermes 提供对特定标识符（错误代码、函数名）的精确召回，又能为相关概念提供语义召回。
+
+---
+
+## 提供给 Hermes 的记忆工具
+
+插件暴露 Hermes 在任务期间可调用的记忆工具：
+
+| 工具 | 用途 |
+|---|---|
+| `memory_search` | 跨技能、轨迹和世界模型搜索 |
+| `memory_get` | 按 ID 获取特定记忆记录 |
+| `memory_timeline` | 检查情节或任务时间线 |
+| `skill_list` | 列出所有可调用的技能 |
+| `skill_get` | 获取技能的调用指南 |
+| `memory_environment` | 为项目结构和约束查询世界模型 |
+
+工具成功和失败都会被记录。失败模式可以触发决策修复，将纠正性上下文注入下一轮，使 Hermes 避免重复同样的错误。
+
+---
+
+## 数据管理
+
+| 操作 | 方法 |
+|---|---|
+| **备份** | 从 **Viewer → Import** 导出 JSON，或复制 `~/.hermes/memos-plugin/` |
+| **仅清除记忆** | 删除 `~/.hermes/memos-plugin/` 内的 `data/` 和 `skills/` |
+| **清除日志** | 删除 `~/.hermes/memos-plugin/logs/` 下的常规文件 |
+| **完全重置** | 完全删除 `~/.hermes/memos-plugin/` —— 下次启动时会重新创建为空 |
+
+---
+
+## 可选：团队共享
+
+默认情况下，OpenClaw 和 Hermes 使用独立的数据库，无共享数据。要在 LAN 或 VPN 上的多台机器间共享结晶化技能和可选的轨迹摘录，请在 Memory Viewer 中转到 **Settings → Team Sharing** 并启用 hub。如果 hub 不可达，插件会优雅地降级为仅本地模式。

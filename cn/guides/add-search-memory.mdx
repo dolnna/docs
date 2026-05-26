@@ -1,0 +1,230 @@
+---
+title: "使用 MemOS 添加和搜索记忆"
+description: "学习如何将对话消息存储为记忆，并在之后通过 MemOS REST API 和 Python SDK 使用语义搜索检索它们。"
+---
+
+`POST /product/add` 和 `POST /product/search` 端点是每个 MemOS 集成的基础。您将对话消息作为记忆存储，然后按含义查询它们 —— 不仅仅是关键词 —— 以为您的 AI Agent 或聊天机器人检索最相关的上下文。
+
+## 前置条件
+
+- 一个运行中的 MemOS 实例（云端或自部署）
+- 一个用于关联记忆的 `user_id` —— 使用 UUID，例如来自您自己的用户数据库的 ID
+- 一个用于限定记忆范围的 `cube_id` —— 使用描述性字符串，例如 `"user-abc123-personal"`
+
+<Tip>
+  在生产环境中为 `user_id` 和 `cube_id` 都使用 UUID 以避免冲突。本地测试时，使用 `"test_user_1"` 和 `"cube_test_user_1"` 等简短可读字符串即可。
+</Tip>
+
+## 从对话中添加记忆
+
+MemOS 接受标准 OpenAI 消息格式的对话。当您 POST 一个对话时，MemOS 处理消息、提取有意义的事实，并将其存储到指定的 cube 中。
+
+<Steps>
+  <Step title="构建 add 请求">
+    用用户 ID、目标 cube、消息和执行模式组装您的请求体。
+
+    | 字段 | 类型 | 描述 |
+    | --- | --- | --- |
+    | `user_id` | string | 标识此记忆属于谁。 |
+    | `writable_cube_ids` | string[] | 一个或多个用于写入记忆的 MemCube ID。 |
+    | `messages` | object[] | OpenAI 格式的对话轮次 —— 每条带 `role` 和 `content`。 |
+    | `async_mode` | string | `"sync"` 等待操作完成；`"async"` 将其入队并立即返回任务 ID。 |
+
+  </Step>
+  <Step title="发送请求">
+
+    <CodeGroup>
+
+    ```bash curl
+    curl -X POST https://your-memos-host/product/add \
+      -H "Content-Type: application/json" \
+      -d '{
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "messages": [
+          {
+            "role": "user",
+            "content": "I have a trip to Tokyo planned for next month. What sushi restaurants do you recommend?"
+          },
+          {
+            "role": "assistant",
+            "content": "For sushi in Tokyo, consider Sukiyabashi Jiro in Ginza or Sushi Saito in Minato — both are world-renowned. Ichizushi in Shibuya is a great mid-range option."
+          },
+          {
+            "role": "user",
+            "content": "I prefer omakase-style dining and I do not eat shellfish."
+          },
+          {
+            "role": "assistant",
+            "content": "Noted! Both Jiro and Saito specialize in omakase, and you can request no shellfish when you make a reservation."
+          }
+        ],
+        "async_mode": "sync"
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    response = requests.post(
+        "https://your-memos-host/product/add",
+        json={
+            "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "writable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "I have a trip to Tokyo planned for next month. What sushi restaurants do you recommend?"
+                },
+                {
+                    "role": "assistant",
+                    "content": "For sushi in Tokyo, consider Sukiyabashi Jiro in Ginza or Sushi Saito in Minato — both are world-renowned. Ichizushi in Shibuya is a great mid-range option."
+                },
+                {
+                    "role": "user",
+                    "content": "I prefer omakase-style dining and I do not eat shellfish."
+                },
+                {
+                    "role": "assistant",
+                    "content": "Noted! Both Jiro and Saito specialize in omakase, and you can request no shellfish when you make a reservation."
+                }
+            ],
+            "async_mode": "sync",
+        },
+    )
+    print(response.json())
+    ```
+
+    </CodeGroup>
+
+  </Step>
+  <Step title="检查响应">
+    成功的同步 add 返回带 `200` 代码的 `MemoryResponse`：
+
+    ```json
+    {
+      "code": 200,
+      "message": "Memory added successfully",
+      "data": []
+    }
+    ```
+
+    如果使用 `async_mode: "async"`，响应包含一个可以通过 `GET /product/scheduler/status` 轮询的 `task_id`。
+  </Step>
+</Steps>
+
+<Note>
+  开发和测试时使用 `async_mode: "sync"`，以便您可以立即搜索刚刚存储的内容。在生产环境中切换到 `async_mode: "async"` 实现非阻塞、高吞吐量摄取。
+</Note>
+
+## 搜索已存储的记忆
+
+记忆存储后，您可以使用自然语言查询检索最相关的记忆。MemOS 使用语义向量搜索 —— 您不需要匹配确切的关键词。
+
+<Steps>
+  <Step title="构建搜索请求">
+
+    | 字段 | 类型 | 描述 |
+    | --- | --- | --- |
+    | `query` | string | 您希望获取相关记忆的问题或主题。 |
+    | `user_id` | string | 要搜索其记忆的用户。 |
+    | `readable_cube_ids` | string[] | 要搜索的一个或多个 MemCube ID。 |
+    | `top_k` | integer | 返回的最大记忆数量。默认为 `10`。 |
+
+  </Step>
+  <Step title="发送请求">
+
+    <CodeGroup>
+
+    ```bash curl
+    curl -X POST https://your-memos-host/product/search \
+      -H "Content-Type: application/json" \
+      -d '{
+        "query": "What does this user like to eat?",
+        "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+        "top_k": 10
+      }'
+    ```
+
+    ```python Python
+    import requests
+
+    response = requests.post(
+        "https://your-memos-host/product/search",
+        json={
+            "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "readable_cube_ids": ["cube-a1b2c3d4-personal"],
+            "query": "What does this user like to eat?",
+            "top_k": 10,
+        },
+    )
+    data = response.json()
+    for cube in data["data"]["text_mem"]:
+        for memory in cube["memories"]:
+            print(memory["memory"], "—", memory["metadata"]["relativity"])
+    ```
+
+    </CodeGroup>
+
+  </Step>
+  <Step title="读取响应">
+    响应包含一个带 `text_mem` 数组的 `data` 对象。每个条目代表一个 MemCube 并包含一个匹配的记忆列表：
+
+    ```json
+    {
+      "code": 200,
+      "message": "Search memories successfully",
+      "data": {
+        "text_mem": [
+          {
+            "cube_id": "cube-a1b2c3d4-personal",
+            "memories": [
+              {
+                "id": "mem-uuid-001",
+                "memory": "User prefers omakase-style sushi dining.",
+                "metadata": {
+                  "memory_type": "UserMemory",
+                  "relativity": 0.91,
+                  "created_at": "2025-05-20T14:32:00Z"
+                }
+              },
+              {
+                "id": "mem-uuid-002",
+                "memory": "User does not eat shellfish.",
+                "metadata": {
+                  "memory_type": "PreferenceMemory",
+                  "relativity": 0.87,
+                  "created_at": "2025-05-20T14:32:00Z"
+                }
+              },
+              {
+                "id": "mem-uuid-003",
+                "memory": "User is planning a trip to Tokyo next month.",
+                "metadata": {
+                  "memory_type": "WorkingMemory",
+                  "relativity": 0.74,
+                  "created_at": "2025-05-20T14:32:00Z"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+    ```
+
+    每个记忆项包含一个 0 到 1 之间的 `relativity` 分数 —— 越高表示与您查询的相关度越强。默认情况下，只有 `relativity >= 0.45` 的记忆会被返回。
+
+  </Step>
+</Steps>
+
+<Tip>
+  将返回的 `memory` 字符串作为上下文直接传入您的 LLM 系统提示中。`id` 字段在您之后想用反馈端点纠正特定记忆时会很有用。
+</Tip>
+
+## 下一步
+
+- [使用带记忆增强响应的对话](/cn/guides/chat-with-memory) —— 让 MemOS 在聊天时自动处理检索和注入
+- [使用反馈纠正记忆](/cn/guides/feedback-correction) —— 在不删除历史的情况下修复错误事实
+- [跨多个 cube 搜索](/cn/guides/multi-cube) —— 将查询范围限定到个人和共享知识空间

@@ -1,0 +1,170 @@
+---
+title: "MemCube：面向用户和项目的记忆容器"
+description: "了解 MemCube 如何按用户或项目隔离和组织记忆，以及如何在 API 请求中使用可写和可读的 cube ID。"
+---
+
+MemCube 是一个自包含的记忆容器 —— 就像一个便携的卡带，存放特定用户、会话或项目的所有记忆。当您为用户添加记忆时，您写入他们的 MemCube。当您搜索时，您从一个或多个 MemCube 读取。这种隔离模型使您能够独立管理众多用户的记忆，在需要时在 Agent 之间共享记忆，并保持每个用户数据的整洁与可移植。
+
+## MemCube 结构
+
+每个 MemCube 都有固定结构，包含五个关键字段：
+
+```
+MemCube
+ ├── user_id       — the user this cube belongs to
+ ├── cube_id       — a unique identifier you assign (UUID recommended)
+ ├── text_mem      — textual memory: facts, preferences, knowledge
+ ├── act_mem       — activation memory: KV-cache for inference acceleration
+ └── para_mem      — parametric memory: LoRA adapter weights
+```
+
+- **`user_id`** 标识该 MemCube 属于哪个用户。
+- **`cube_id`** 是您创建和管理的唯一字符串 —— 例如，`"user-abc-main"` 或类似 `"f3a9c1d2-..."` 的 UUID。您在每次添加和搜索请求中引用此 ID。
+- **`text_mem`**、**`act_mem`** 和 **`para_mem`** 是三种记忆类型槽位。大多数应用使用 `text_mem`。各类型详情请参阅 [记忆类型](/cn/concepts/memory-types)。
+
+## 可写与可读的 cube ID
+
+MemOS 将"写入记忆的位置"和"读取记忆的位置"这两个概念分离。这种区分使您能够构建灵活的多 cube 拓扑 —— 例如，个人 cube 加上共享团队 cube。
+
+| 字段 | 用于 | 行为 |
+|-------|----------|---------|
+| `writable_cube_ids` | 添加操作 (`POST /product/add`) | 并行写入所有列出的 cube |
+| `readable_cube_ids` | 搜索操作 (`POST /product/search`) | 在所有列出的 cube 中搜索；结果包含来源 `cube_id` |
+
+您可以在任一字段中列出多个 cube。当您向多个 cube 写入时，MemOS 会并行处理所有写入。当您跨多个 cube 搜索时，结果会被合并，且每个结果都包含其来源 cube。
+
+## 向 cube 添加记忆
+
+要添加记忆，请在请求体中与消息一起包含 `writable_cube_ids`：
+
+```json
+POST /product/add
+{
+  "user_id": "user-abc",
+  "writable_cube_ids": ["user-abc-main"],
+  "messages": [
+    {"role": "user", "content": "I prefer dark mode and use VS Code."},
+    {"role": "assistant", "content": "Got it, I'll remember your preferences."}
+  ],
+  "async_mode": "sync"
+}
+```
+
+MemOS 从消息中提取结构化记忆，并将其存储到 `user-abc-main` 的 `text_mem` 中。
+
+## 从 cube 搜索记忆
+
+要搜索，请使用 `readable_cube_ids` 配合自然语言查询：
+
+```json
+POST /product/search
+{
+  "user_id": "user-abc",
+  "readable_cube_ids": ["user-abc-main"],
+  "query": "What editor does the user prefer?"
+}
+```
+
+响应返回按类型分组的相关记忆：
+
+```json
+{
+  "text_mem": [
+    {
+      "cube_id": "user-abc-main",
+      "memories": [
+        {
+          "id": "mem-001",
+          "memory": "User prefers dark mode and uses VS Code.",
+          "metadata": {
+            "type": "preference",
+            "confidence": 95,
+            "source": "conversation"
+          }
+        }
+      ]
+    }
+  ],
+  "act_mem": [],
+  "para_mem": []
+}
+```
+
+## 多 cube 搜索
+
+当您需要跨多个记忆空间搜索时 —— 例如，一个用户的个人 cube 和一个共享知识库 —— 在 `readable_cube_ids` 中列出两者：
+
+```json
+POST /product/search
+{
+  "user_id": "user-abc",
+  "readable_cube_ids": ["user-abc-main", "shared-knowledge-base"],
+  "query": "What are the deployment requirements?"
+}
+```
+
+来自每个 cube 的结果会一起返回。每个结果都包含一个 `cube_id` 字段，以便您知道它来自哪里。
+
+<Tip>
+  使用独立的 MemCube 来建模不同的记忆范围：每个用户的个人 cube、用于团队知识的共享 cube，以及用于产品文档的领域 cube。可以在一次请求中跨所有这些 cube 搜索。
+</Tip>
+
+## 同步与异步模式
+
+每个 add 请求都包含 `async_mode` 来控制 MemOS 是否等待操作完成：
+
+<Tabs>
+  <Tab title="同步模式">
+    MemOS 立即处理记忆提取和存储，并等待其完成后再返回响应。
+
+    ```json
+    {
+      "user_id": "user-abc",
+      "writable_cube_ids": ["user-abc-main"],
+      "messages": [...],
+      "async_mode": "sync"
+    }
+    ```
+
+    在开发和测试期间使用同步模式，当您需要在继续之前确认记忆已存储时。
+  </Tab>
+  <Tab title="异步模式">
+    MemOS 将工作提交到 MemScheduler 后台队列并立即返回一个 `task_id` —— 而不等待提取完成。
+
+    ```json
+    {
+      "user_id": "user-abc",
+      "writable_cube_ids": ["user-abc-main"],
+      "messages": [...],
+      "async_mode": "async"
+    }
+    ```
+
+    响应返回一个 `task_id`。轮询 `GET /product/scheduler/status` 并提供您的 `user_id` 和 `task_id` 来检查操作何时完成。
+
+    在生产环境中使用异步模式，以在高负载下保持 API 响应快速。
+  </Tab>
+</Tabs>
+
+## 持久化和迁移 MemCube
+
+MemCube 可以导出到磁盘并随时重新加载，使其能够跨会话、环境或模型移植。这对以下场景非常有用：
+
+- 备份用户的完整记忆状态
+- 将记忆从一个部署迁移到另一个
+- 在多个 Agent 之间共享一份精心整理的记忆集
+
+<Note>
+  导出和导入 MemCube 时，请确保导出和导入环境之间的嵌入模型和维度一致。不匹配的嵌入会导致搜索结果不准确。
+</Note>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="记忆类型" icon="layers" href="/cn/concepts/memory-types">
+    了解每个 MemCube 内部存储的内容 —— 文本、激活和参数记忆。
+  </Card>
+  <Card title="MemScheduler" icon="clock" href="/cn/concepts/mem-scheduler">
+    了解异步模式的工作原理以及如何追踪后台任务状态。
+  </Card>
+</CardGroup>

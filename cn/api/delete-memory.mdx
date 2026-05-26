@@ -1,0 +1,246 @@
+---
+title: '删除记忆 —— POST /product/delete_memory'
+description: '通过 ID、会话或过滤器从 MemCube 中删除一条或多条记忆。删除是软删除，版本历史被保留。'
+---
+
+Delete Memory 端点从 MemCube 中移除记忆。您可以按显式记忆 ID 列表、按会话或使用元数据过滤器删除。MemOS 中的删除是软删除：记忆节点被标记为已删除并从搜索结果中排除，但版本历史保留并可在需要时恢复。在调用此端点之前，请从 [Search](/cn/api/search) 或 [Get Memory](/cn/api/get-memory) 端点获取记忆 ID。
+
+## 端点
+
+```
+POST /product/delete_memory
+```
+
+## 请求体
+
+<ParamField body="writable_cube_ids" type="string[]">
+  要从中删除的 MemCube ID 列表。在不含 `user_id` 作用域而按 `memory_ids` 删除时必需。您必须对列出的每个 cube 拥有写入权限。
+</ParamField>
+
+<ParamField body="memory_ids" type="string[]">
+  要删除的记忆 UUID 列表。您可以从搜索或 get-memory 响应中检索这些 ID。
+</ParamField>
+
+<ParamField body="user_id" type="string">
+  提供时，删除目标 MemCube 中属于此用户的所有记忆。
+</ParamField>
+
+<ParamField body="session_id" type="string">
+  提供时，删除与此会话关联的所有记忆。
+</ParamField>
+
+<ParamField body="file_ids" type="string[]">
+  应删除其关联记忆的文件 ID 列表（用于文档来源的记忆）。
+</ParamField>
+
+<ParamField body="filter" type="object">
+  结构化元数据过滤器。所有匹配过滤器的记忆都将被删除。
+
+  <Expandable title="filter example">
+    ```json
+    {
+      "and": [
+        { "tags": "travel" },
+        { "created_at": { "lt": "2025-01-01" } }
+      ]
+    }
+    ```
+  </Expandable>
+</ParamField>
+
+<Note>
+  您必须至少提供 `memory_ids`、`user_id`、`session_id` 或 `filter` 之一。一个都不提供将导致验证错误。
+</Note>
+
+## 响应
+
+<ResponseField name="code" type="number" required>
+  成功时为 `200`。
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  人类可读的状态消息。
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  <Expandable title="data object">
+    <ResponseField name="data.success" type="boolean">
+      删除成功应用时为 `true`。
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## 示例
+
+### 按 ID 删除特定记忆
+
+首先，使用 Search 端点检索记忆 ID：
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/search \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "query": "meeting location",
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "top_k": 5
+  }'
+```
+
+然后按返回的 ID 删除：
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/delete_memory \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "memory_ids": [
+      "2f40be8f-736c-4a5f-aada-9489037769e0",
+      "7c91aa32-1e2b-4d98-b4e7-0001234abcde"
+    ]
+  }'
+```
+
+```python Python
+import requests
+
+# Step 1: search for the memories you want to remove
+search_resp = requests.post(
+    "http://localhost:8000/product/search",
+    json={
+        "query": "meeting location",
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "top_k": 5,
+    },
+)
+ids_to_delete = [
+    m["id"]
+    for cube in search_resp.json()["data"]["text_mem"]
+    for m in cube["memories"]
+]
+
+# Step 2: delete by ID
+delete_resp = requests.post(
+    "http://localhost:8000/product/delete_memory",
+    json={
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "memory_ids": ids_to_delete,
+    },
+)
+print(delete_resp.json())
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory deleted successfully",
+  "data": {
+    "success": true
+  }
+}
+```
+
+### 删除会话的所有记忆
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/delete_memory \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "session_id": "session-abc-123"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/delete_memory",
+    json={
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "session_id": "session-abc-123",
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+### 按元数据过滤器删除
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/delete_memory \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "filter": {
+      "and": [
+        { "tags": "outdated" }
+      ]
+    }
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/delete_memory",
+    json={
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "filter": {
+            "and": [
+                {"tags": "outdated"}
+            ]
+        },
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+## 软删除行为
+
+<Info>
+  MemOS 不会立即永久擦除删除的记忆。每次删除都会创建一条版本记录。这意味着：
+  - 删除的记忆不再出现在搜索结果或记忆列表中。
+  - 如果需要，底层数据可以通过编程方式恢复。
+  - 为满足合规需求保留审计轨迹。
+</Info>
+
+## 错误响应
+
+| Code | 描述 |
+|------|-------------|
+| `400` | 未提供删除条件或请求格式错误。 |
+| `422` | 验证错误 —— 一个或多个字段未通过类型检查。 |
+| `500` | 删除期间发生内部错误。 |
+
+```json 422
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["body", "writable_cube_ids"],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```

@@ -1,0 +1,174 @@
+---
+title: "MemScheduler：后台的异步记忆处理"
+description: "了解 MemScheduler 如何异步处理记忆操作、何时使用异步与同步模式，以及如何通过 task_id 追踪任务状态。"
+---
+
+MemScheduler 是 MemOS 中的后台处理引擎。当您使用 `async_mode: "async"` 添加记忆时，MemOS 不会等待提取、嵌入和存储完成 —— 它将工作交给 MemScheduler 并立即返回一个 `task_id`。MemScheduler 随后在后台处理操作，不会阻塞您的应用。本页面解释了何时使用异步模式、队列的工作方式以及如何监控任务进度。
+
+## MemScheduler 在请求流程中的位置
+
+当您提交一个 `async_mode: "async"` 的 add 请求时：
+
+<Steps>
+  <Step title="您的请求被立即接受">
+    MemOS 验证您的请求并返回一个带 `task_id` 的响应。您的应用无需等待即可继续。
+  </Step>
+  <Step title="任务进入调度器队列">
+    MemScheduler 将您的记忆操作放入队列。根据您的部署配置，这可以是本地进程内队列或 Redis Stream。
+  </Step>
+  <Step title="MemScheduler 在后台处理任务">
+    MemScheduler 取出任务，运行 MemReader 提取结构化记忆，对其进行嵌入，并将其写入目标 MemCube —— 整个过程无需您的应用参与。
+  </Step>
+  <Step title="您轮询状态（可选）">
+    如果您的应用需要知道操作何时完成，请调用 `GET /product/scheduler/status` 并提供您的 `user_id` 和 `task_id` 来检查当前状态。
+  </Step>
+</Steps>
+
+## 异步 vs 同步：何时使用各自
+
+<Tabs>
+  <Tab title="在生产中使用异步">
+    异步模式让您的 API 保持快速。记忆提取涉及 LLM 调用和向量嵌入 —— 这些操作可能耗时数百毫秒。使用异步模式，您面向用户的响应时间与处理和存储记忆的时间解耦。
+
+    **在以下情况使用 `async_mode: "async"`：**
+
+    - 您在生产环境中处理并发用户
+    - 响应延迟对您的应用很重要
+    - 您正在摄取大型文档或长对话历史
+    - 您不需要立即确认记忆已存储
+
+    ```json
+    POST /product/add
+    {
+      "user_id": "user-abc",
+      "writable_cube_ids": ["user-abc-main"],
+      "messages": [
+        {"role": "user", "content": "I'm vegetarian and I prefer Italian food."}
+      ],
+      "async_mode": "async"
+    }
+    ```
+
+    响应：
+
+    ```json
+    {
+      "task_id": "task-7f3a9c1d-...",
+      "status": "queued"
+    }
+    ```
+  </Tab>
+  <Tab title="开发时使用同步">
+    同步模式会阻塞直到 MemOS 完成处理并确认记忆已存储。这使得在开发、测试和调试期间更容易推理状态。
+
+    **在以下情况使用 `async_mode: "sync"`：**
+
+    - 您正在测试记忆提取是否正常工作
+    - 您需要在同一流程中运行搜索之前验证记忆已存储
+    - 您正在运行集成测试或示例
+    - 吞吐量不是关注点
+
+    ```json
+    POST /product/add
+    {
+      "user_id": "user-abc",
+      "writable_cube_ids": ["user-abc-main"],
+      "messages": [
+        {"role": "user", "content": "I'm vegetarian and I prefer Italian food."}
+      ],
+      "async_mode": "sync"
+    }
+    ```
+
+    响应确认完成 —— 无需轮询。
+  </Tab>
+</Tabs>
+
+## 追踪任务状态
+
+提交异步 add 请求后，使用调度器状态端点检查您的任务：
+
+```
+GET /product/scheduler/status?user_id=user-abc&task_id=task-7f3a9c1d-...
+```
+
+响应显示任务当前状态：
+
+| 状态 | 含义 |
+|--------|---------|
+| `queued` | 任务在队列中等待 worker |
+| `running` | MemScheduler 正在主动处理任务 |
+| `completed` | 记忆操作已成功完成 |
+| `failed` | 任务遇到错误；请检查响应了解详情 |
+
+<Note>
+  只有在您的应用逻辑依赖于知道记忆何时被存储时（例如，您计划立即搜索它），才需要轮询状态。在大多数生产流程中，您可以"发完即忘"地发送异步 add 请求。
+</Note>
+
+## 队列后端
+
+MemScheduler 支持两种队列后端。您通过 `MOS_SCHEDULER_USE_REDIS_QUEUE` 环境变量在它们之间选择。
+
+<CardGroup cols={2}>
+  <Card title="本地队列" icon="computer">
+    **用于开发和测试**
+
+    一个快速的进程内队列，无外部依赖。任务在同一进程中立即处理。如果进程重启，数据会丢失。
+
+    设置 `MOS_SCHEDULER_USE_REDIS_QUEUE=false`。
+
+    在本地运行 MemOS、编写集成测试或迭代应用逻辑时使用。
+  </Card>
+  <Card title="Redis Streams" icon="database">
+    **用于生产**
+
+    由 Redis Streams 支持的持久化、分布式队列。任务在重启后仍然保留，支持跨多个 MemOS 实例的消费者组负载均衡，并可用标准 Redis 工具检查。
+
+    设置 `MOS_SCHEDULER_USE_REDIS_QUEUE=true` 并配置您的 Redis 连接。
+
+    适用于所有生产部署，尤其是多实例或高吞吐量场景。
+  </Card>
+</CardGroup>
+
+## MemScheduler 处理的任务类型
+
+MemScheduler 处理多种类型的后台任务。从您作为 API 用户的角度，最相关的是：
+
+<AccordionGroup>
+  <Accordion title="add —— 记忆摄取">
+    当您调用 `POST /product/add` 并设置 `async_mode: "async"` 时触发。MemScheduler 运行 MemReader 从您的消息中提取结构化记忆，并将它们写入目标 MemCube。
+  </Accordion>
+  <Accordion title="mem_read —— 文档摄取">
+    处理外部内容的深度处理 —— 文档、文件或 web URL —— 通过 MemReader 将其转换为结构化记忆项。
+  </Accordion>
+  <Accordion title="mem_feedback —— 反馈处理">
+    在提交反馈时触发（用户纠正 AI 响应）。MemScheduler 将反馈路由到 MemFeedback，由其定位并更新相关记忆。
+  </Accordion>
+  <Accordion title="mem_organize —— 记忆整合">
+    运行周期性记忆重组：合并重复记忆、归档陈旧记忆，并随时间维护 MemCube 的整体健康。
+  </Accordion>
+</AccordionGroup>
+
+## 启用 MemScheduler
+
+MemScheduler 通过 `MOS_ENABLE_SCHEDULER` 环境变量启用。启用后，它会在 MemOS 服务器初始化时自动启动。
+
+```bash
+MOS_ENABLE_SCHEDULER=true
+MOS_SCHEDULER_USE_REDIS_QUEUE=true   # false for local queue
+```
+
+<Tip>
+  对于生产部署，始终使用 Redis Streams。本地队列在进程重启后不会保留 —— 如果服务器意外重启，任何未处理的任务都将丢失。
+</Tip>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="MemCube" icon="box" href="/cn/concepts/mem-cube">
+    了解可写和可读的 cube ID 如何与异步 add 请求协同工作。
+  </Card>
+  <Card title="环境变量" icon="settings" href="/cn/configuration/environment-variables">
+    配置调度器设置、Redis 连接和队列行为。
+  </Card>
+</CardGroup>

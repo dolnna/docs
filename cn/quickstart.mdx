@@ -1,0 +1,324 @@
+---
+title: "快速开始：完成您的第一次记忆 API 调用"
+description: "在 5 分钟内添加并搜索您的第一条记忆 —— 支持 MemOS 云端 API 或自部署实例。云端无需任何前置配置。"
+---
+
+本指南将引导您添加一条记忆并将其搜索回来。您将发送两次 API 调用 —— 一次用于存储对话中的事实，一次通过语义查询将其检索回来。如果您想完全跳过基础设施配置，请选择云端路径；如果您本地已经运行了 MemOS 服务器，请选择自部署路径。
+
+## 选择您的路径
+
+<Tabs>
+  <Tab title="云端 API">
+    MemOS 云端 API 是最快速的上手方式。您只需要一个账号和一个 API 密钥 —— 无需运行任何服务器。
+
+    <Steps>
+      <Step title="创建账号并获取您的 API 密钥">
+        在 [memos-dashboard.openmem.net](https://memos-dashboard.openmem.net) 注册。登录后，在控制台中导航到 **API Keys**，复制您的密钥。
+
+        <Note>
+          请妥善保管您的 API 密钥。将它视为密码 —— 不要提交到源代码版本控制中。
+        </Note>
+      </Step>
+
+      <Step title="添加您的第一条记忆">
+        发送一个带有对话消息的 `POST /product/add` 请求。MemOS 会自动从消息内容中提取结构化事实。
+
+        <CodeGroup>
+          ```bash curl
+          curl --location --request POST 'https://api.openmem.net/product/add' \
+            --header 'Content-Type: application/json' \
+            --header 'Authorization: Bearer YOUR_API_KEY' \
+            --data-raw '{
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "I like strawberry"
+                }
+              ],
+              "async_mode": "sync"
+            }'
+          ```
+
+          ```python Python
+          import requests
+          import json
+
+          data = {
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+              "messages": [
+                  {
+                      "role": "user",
+                      "content": "I like strawberry"
+                  }
+              ],
+              "async_mode": "sync"
+          }
+          headers = {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer YOUR_API_KEY"
+          }
+          url = "https://api.openmem.net/product/add"
+
+          res = requests.post(url=url, headers=headers, data=json.dumps(data))
+          print(f"result: {res.json()}")
+          ```
+        </CodeGroup>
+
+        成功的响应如下所示：
+
+        ```json
+        {
+          "code": 200,
+          "message": "Memory created successfully",
+          "data": null
+        }
+        ```
+      </Step>
+
+      <Step title="搜索您的记忆">
+        现在查询您刚存储的内容。MemOS 使用语义搜索 —— 您不需要匹配存储时使用的精确单词。
+
+        <CodeGroup>
+          ```bash curl
+          curl --location --request POST 'https://api.openmem.net/product/search' \
+            --header 'Content-Type: application/json' \
+            --header 'Authorization: Bearer YOUR_API_KEY' \
+            --data-raw '{
+              "query": "What do I like",
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"]
+            }'
+          ```
+
+          ```python Python
+          import requests
+          import json
+
+          data = {
+              "query": "What do I like",
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"]
+          }
+          headers = {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer YOUR_API_KEY"
+          }
+          url = "https://api.openmem.net/product/search"
+
+          res = requests.post(url=url, headers=headers, data=json.dumps(data))
+          print(f"result: {res.json()}")
+          ```
+        </CodeGroup>
+
+        响应返回按排名排列的匹配记忆列表：
+
+        ```json
+        {
+          "code": 200,
+          "message": "Search completed successfully",
+          "data": {
+            "text_mem": [
+              {
+                "cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+                "memories": [
+                  {
+                    "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+                    "memory": "[user opinion] User likes strawberries.",
+                    "metadata": {
+                      "type": "fact",
+                      "key": "User's preference for strawberries",
+                      "confidence": 0.99,
+                      "tags": ["preference", "strawberries"],
+                      "relativity": 0.63
+                    },
+                    "ref_id": "[2f40be8f]"
+                  }
+                ]
+              }
+            ],
+            "act_mem": [],
+            "para_mem": []
+          }
+        }
+        ```
+
+        `memory` 字段包含 MemOS 从您原始消息中提取的事实。`relativity` 分数表示与您查询的语义相关度。
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="自部署">
+    如果您本地运行了 MemOS 服务器（参见 [安装](/cn/installation)），基础 URL 是 `http://localhost:8000`。本地部署默认不需要 API 密钥。
+
+    <Steps>
+      <Step title="确认您的服务器正在运行">
+        在浏览器中打开 [http://localhost:8000/docs](http://localhost:8000/docs)。您应该能看到交互式 API 文档。如果页面没有加载，请先按照 [安装指南](/cn/installation) 操作。
+      </Step>
+
+      <Step title="添加您的第一条记忆">
+        向您的本地服务器发送 `POST /product/add` 请求：
+
+        <CodeGroup>
+          ```bash curl
+          curl --location --request POST 'http://localhost:8000/product/add' \
+            --header 'Content-Type: application/json' \
+            --data-raw '{
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "I like eating strawberries"
+                }
+              ],
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"]
+            }'
+          ```
+
+          ```python Python
+          import requests
+          import json
+
+          data = {
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+              "messages": [
+                  {
+                      "role": "user",
+                      "content": "I like eating strawberries"
+                  }
+              ],
+              "async_mode": "sync"
+          }
+          headers = {"Content-Type": "application/json"}
+          url = "http://localhost:8000/product/add"
+
+          res = requests.post(url=url, headers=headers, data=json.dumps(data))
+          print(f"result: {res.json()}")
+          ```
+        </CodeGroup>
+
+        成功的响应：
+
+        ```json
+        {
+          "code": 200,
+          "message": "Memory created successfully",
+          "data": null
+        }
+        ```
+      </Step>
+
+      <Step title="搜索您的记忆">
+        查询您刚刚存储的记忆：
+
+        <CodeGroup>
+          ```bash curl
+          curl --location --request POST 'http://localhost:8000/product/search' \
+            --header 'Content-Type: application/json' \
+            --data-raw '{
+              "query": "What do I like to eat",
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+              "top_k": 20
+            }'
+          ```
+
+          ```python Python
+          import requests
+          import json
+
+          data = {
+              "query": "What do I like to eat",
+              "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+              "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"]
+          }
+          headers = {"Content-Type": "application/json"}
+          url = "http://localhost:8000/product/search"
+
+          res = requests.post(url=url, headers=headers, data=json.dumps(data))
+          print(f"result: {res.json()}")
+          ```
+        </CodeGroup>
+
+        响应返回带有元数据的排名记忆：
+
+        ```json
+        {
+          "code": 200,
+          "message": "Search completed successfully",
+          "data": {
+            "text_mem": [
+              {
+                "cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+                "memories": [
+                  {
+                    "id": "2f40be8f-736c-4a5f-aada-9489037769e0",
+                    "memory": "[user opinion] User likes strawberries.",
+                    "metadata": {
+                      "type": "fact",
+                      "key": "User's preference for strawberries",
+                      "confidence": 0.99,
+                      "tags": ["preference", "strawberries"],
+                      "relativity": 0.63
+                    },
+                    "ref_id": "[2f40be8f]"
+                  }
+                ]
+              }
+            ],
+            "act_mem": [],
+            "para_mem": []
+          }
+        }
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Python SDK：MOS.simple()
+
+如果您更喜欢使用 Python SDK 而非直接 REST 调用，`MOS.simple()` 是最快的上手方式。它从环境变量读取您的凭证，并自动配置一个默认的 MemCube。
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+export MOS_TEXT_MEM_TYPE="general_text"
+```
+
+```python
+from memos.mem_os.main import MOS
+
+# 创建一个 MOS 实例 —— 从环境变量读取 OPENAI_API_KEY
+memory = MOS.simple()
+
+# 添加一条记忆
+memory.add_memory("I like strawberry")
+
+# 进行带记忆增强上下文的对话
+response = memory.chat("What do I like?")
+print(response)
+```
+
+<Note>
+  `MOS.simple()` 要求在您的环境中设置 `OPENAI_API_KEY`。它默认使用 `general_text` 记忆类型。如需对 LLM 提供商和记忆后端进行更多控制，请参阅 [LLM 提供商指南](/cn/integrations/llm-providers)。
+</Note>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="安装" icon="download" href="/cn/installation">
+    使用 Docker、pip 或从源代码搭建自部署的 MemOS 服务器。
+  </Card>
+  <Card title="API 参考：添加记忆" icon="plus" href="/cn/api/add">
+    `POST /product/add` 端点的完整参考 —— 所有字段和选项。
+  </Card>
+  <Card title="API 参考：搜索" icon="magnifying-glass" href="/cn/api/search">
+    `POST /product/search` 的完整参考 —— 过滤器、top_k 和响应格式。
+  </Card>
+  <Card title="核心概念" icon="brain" href="/cn/concepts/overview">
+    了解 MemCube、记忆类型和 MemScheduler 如何协同工作。
+  </Card>
+</CardGroup>

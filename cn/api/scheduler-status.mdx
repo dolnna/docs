@@ -1,0 +1,374 @@
+---
+title: '调度器状态 —— GET /product/scheduler/status'
+description: '检查用户的某个任务或所有任务的状态、检查全局调度器健康指标，或查询用户的原始 Redis 队列积压。'
+---
+
+MemOS 通过后台调度器异步处理记忆操作 —— 添加、由聊天触发的搜索、偏好提取。这三个端点让您可以在不同粒度上观察调度器在做什么：特定用户的每任务状态、整个调度器的聚合健康指标，以及用于诊断积压问题的原始队列深度。最常见的用法是在异步 `POST /product/add` 调用之后使用 `GET /product/scheduler/status`，以便在发起搜索之前知道处理何时完成。
+
+## 端点
+
+| 方法 | 路径 | 用途 |
+|--------|------|---------|
+| `GET` | `/product/scheduler/status` | 一个用户或一个特定任务的任务级状态 |
+| `GET` | `/product/scheduler/allstatus` | 整个调度器的聚合计数 |
+| `GET` | `/product/scheduler/task_queue_status` | 一个用户的原始 Redis 流队列深度 |
+
+---
+
+## GET /product/scheduler/status
+
+返回某用户每个被跟踪任务的状态，或当您提供 `task_id` 时单个任务的状态。
+
+### 查询参数
+
+<ParamField query="user_id" type="string" required>
+  要查找任务的用户 ID。
+</ParamField>
+
+<ParamField query="task_id" type="string">
+  上一次异步操作返回的可选任务 ID（例如，来自 `POST /product/add` 的 `data.task_id`）。提供时，响应仅包含该任务的状态。省略时，返回该用户的所有任务。
+</ParamField>
+
+### 响应
+
+<ResponseField name="code" type="number" required>
+  HTTP 风格的状态码。成功时为 `200`。
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  人类可读的状态消息，例如 `"Memory get status successfully"`。
+</ResponseField>
+
+<ResponseField name="data" type="object[]" required>
+  任务状态项数组。当用户没有被跟踪的任务时为空。
+
+  <Expandable title="status item">
+    <ResponseField name="data[].task_id" type="string" required>
+      此任务的 ID。
+    </ResponseField>
+    <ResponseField name="data[].status" type="string" required>
+      当前任务状态。以下之一：
+
+      - `"waiting"` —— 已入队，尚未被 worker 拾取。
+      - `"in_progress"` —— 正在被处理。
+      - `"completed"` —— 已成功完成。
+      - `"failed"` —— 因错误终止。
+      - `"cancelled"` —— 在完成前被取消。
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### 示例
+
+#### 检查特定任务
+
+<CodeGroup>
+
+```bash cURL
+curl "http://localhost:8000/product/scheduler/status?user_id=8736b16e-1d20-4163-980b-a5063c3facdc&task_id=a1b2c3d4-5678-90ab-cdef-1234567890ab"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:8000/product/scheduler/status",
+    params={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "task_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory get status successfully",
+  "data": [
+    {
+      "task_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+      "status": "completed"
+    }
+  ]
+}
+```
+
+#### 列出某用户的所有任务
+
+<CodeGroup>
+
+```bash cURL
+curl "http://localhost:8000/product/scheduler/status?user_id=8736b16e-1d20-4163-980b-a5063c3facdc"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:8000/product/scheduler/status",
+    params={"user_id": "8736b16e-1d20-4163-980b-a5063c3facdc"},
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Memory get status successfully",
+  "data": [
+    {
+      "task_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
+      "status": "completed"
+    },
+    {
+      "task_id": "b9e3f210-1234-5678-abcd-ef0123456789",
+      "status": "in_progress"
+    }
+  ]
+}
+```
+
+#### 轮询直到任务完成
+
+```python Python
+import time
+import requests
+
+BASE_URL = "http://localhost:8000"
+USER_ID = "8736b16e-1d20-4163-980b-a5063c3facdc"
+TASK_ID = "a1b2c3d4-5678-90ab-cdef-1234567890ab"
+
+def wait_for_task(task_id: str, poll_interval: float = 1.0, timeout: float = 60.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        resp = requests.get(
+            f"{BASE_URL}/product/scheduler/status",
+            params={"user_id": USER_ID, "task_id": task_id},
+        )
+        resp.raise_for_status()
+        tasks = resp.json()["data"]
+        if tasks and tasks[0]["status"] in ("completed", "failed", "cancelled"):
+            return tasks[0]["status"]
+        time.sleep(poll_interval)
+    raise TimeoutError(f"Task {task_id} did not complete within {timeout}s")
+
+status = wait_for_task(TASK_ID)
+print(f"Task finished with status: {status}")
+```
+
+---
+
+## GET /product/scheduler/allstatus
+
+返回整个调度器的聚合任务计数 —— 适用于健康检查和监控仪表板。
+
+### 查询参数
+
+无必需。
+
+### 响应
+
+<ResponseField name="code" type="number" required>
+  HTTP 风格的状态码。成功时为 `200`。
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  人类可读的状态消息。
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  聚合调度器指标。
+
+  <Expandable title="data object">
+    <ResponseField name="data.scheduler_summary" type="object" required>
+      来自调度器队列监视器的实时计数。当队列监视器可用时反映实时队列深度。
+
+      <Expandable title="TaskSummary fields">
+        <ResponseField name="waiting" type="integer">已入队但尚未开始的任务数。</ResponseField>
+        <ResponseField name="in_progress" type="integer">正在被主动处理的任务数。</ResponseField>
+        <ResponseField name="pending" type="integer">已被 worker 取走但尚未确认的任务数。</ResponseField>
+        <ResponseField name="completed" type="integer">成功完成的任务数。</ResponseField>
+        <ResponseField name="failed" type="integer">因错误终止的任务数。</ResponseField>
+        <ResponseField name="cancelled" type="integer">被取消的任务数。</ResponseField>
+        <ResponseField name="total" type="integer">所有计数任务的总和。</ResponseField>
+      </Expandable>
+    </ResponseField>
+
+    <ResponseField name="data.all_tasks_summary" type="object" required>
+      来自跨所有用户的持久任务状态跟踪器的计数。这些数字包括历史的已完成和失败任务，可能比实时调度器视图稍有滞后。
+
+      包含与 `scheduler_summary` 相同的字段。
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### 示例
+
+<CodeGroup>
+
+```bash cURL
+curl "http://localhost:8000/product/scheduler/allstatus"
+```
+
+```python Python
+import requests
+
+response = requests.get("http://localhost:8000/product/scheduler/allstatus")
+print(response.json())
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Scheduler status summary retrieved successfully",
+  "data": {
+    "scheduler_summary": {
+      "waiting": 3,
+      "in_progress": 1,
+      "pending": 0,
+      "completed": 142,
+      "failed": 2,
+      "cancelled": 0,
+      "total": 148
+    },
+    "all_tasks_summary": {
+      "waiting": 3,
+      "in_progress": 1,
+      "pending": 0,
+      "completed": 150,
+      "failed": 2,
+      "cancelled": 0,
+      "total": 156
+    }
+  }
+}
+```
+
+---
+
+## GET /product/scheduler/task_queue_status
+
+返回某用户队列的原始 Redis 流指标。当您需要在 Redis 层级诊断队列积压问题时使用此端点。
+
+<Note>
+  此端点需要基于 Redis 的调度器。当队列未连接到 Redis 时，它返回 `503`。
+</Note>
+
+### 查询参数
+
+<ParamField query="user_id" type="string" required>
+  您要检查其队列流的用户 ID。
+</ParamField>
+
+### 响应
+
+<ResponseField name="code" type="number" required>
+  HTTP 风格的状态码。成功时为 `200`。
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  人类可读的状态消息。
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  指定用户的队列指标。
+
+  <Expandable title="data object">
+    <ResponseField name="data.user_id" type="string" required>
+      响应所限定的用户 ID。
+    </ResponseField>
+    <ResponseField name="data.stream_keys" type="string[]" required>
+      此用户匹配的 Redis 流键。
+    </ResponseField>
+    <ResponseField name="data.users_count" type="integer" required>
+      所有匹配队列流中出现的不同用户数。
+    </ResponseField>
+    <ResponseField name="data.pending_tasks_count" type="integer" required>
+      已派发给 worker 但尚未确认的任务总数（PEL 大小）。
+    </ResponseField>
+    <ResponseField name="data.remaining_tasks_count" type="integer" required>
+      流中的条目总数（`XLEN`），包括尚未派发的任务。
+    </ResponseField>
+    <ResponseField name="data.pending_tasks_detail" type="string[]" required>
+      格式为 `"{stream_key}:{count}"` 的每流待处理计数。
+    </ResponseField>
+    <ResponseField name="data.remaining_tasks_detail" type="string[]" required>
+      格式为 `"{stream_key}:{count}"` 的每流剩余计数。
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### 示例
+
+<CodeGroup>
+
+```bash cURL
+curl "http://localhost:8000/product/scheduler/task_queue_status?user_id=8736b16e-1d20-4163-980b-a5063c3facdc"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:8000/product/scheduler/task_queue_status",
+    params={"user_id": "8736b16e-1d20-4163-980b-a5063c3facdc"},
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Scheduler task queue status retrieved successfully",
+  "data": {
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "user_name": null,
+    "mem_cube_id": null,
+    "stream_keys": [
+      "memos:stream:8736b16e-1d20-4163-980b-a5063c3facdc:b32d0977-435d-4828-a86f-4f47f8b55bca:add"
+    ],
+    "users_count": 1,
+    "pending_tasks_count": 0,
+    "remaining_tasks_count": 2,
+    "pending_tasks_detail": [
+      "memos:stream:8736b16e-1d20-4163-980b-a5063c3facdc:b32d0977-435d-4828-a86f-4f47f8b55bca:add:0"
+    ],
+    "remaining_tasks_detail": [
+      "memos:stream:8736b16e-1d20-4163-980b-a5063c3facdc:b32d0977-435d-4828-a86f-4f47f8b55bca:add:2"
+    ]
+  }
+}
+```
+
+---
+
+## 错误响应
+
+| Code | 描述 |
+|------|-------------|
+| `404` | 此用户找不到指定的 `task_id`（`/scheduler/status`），或用户没有 Redis 流存在（`/scheduler/task_queue_status`）。 |
+| `503` | 调度器队列未连接到 Redis（仅限 `/scheduler/task_queue_status`）。 |
+| `500` | 读取任务或队列状态时发生内部错误。 |
+
+```json 404
+{
+  "detail": "Task a1b2c3d4-5678-90ab-cdef-1234567890ab not found for user 8736b16e-1d20-4163-980b-a5063c3facdc"
+}
+```

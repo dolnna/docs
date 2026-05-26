@@ -1,0 +1,271 @@
+---
+title: '聊天（complete）—— POST /product/chat/complete'
+description: '发送消息并接收完整的带记忆增强的回复。MemOS 检索相关记忆、构建上下文、调用 LLM 并存储交互。'
+---
+
+chat complete 端点提供一个单次的请求-响应循环，并附带 MemOS 完整的记忆流水线。在调用 LLM 之前，MemOS 在您指定的 cube 中搜索相关记忆和用户偏好，将其注入系统提示，然后生成响应。LLM 响应后，交互会异步写回记忆，以便未来的轮次可以从所说的内容中受益。当您的集成不需要流式 token 时使用此端点 —— 例如，在批处理流水线、服务端 Agent 或任何在采取行动前先收集完整答案的流程中。
+
+<Note>
+  此端点要求在您的环境中设置 `ENABLE_CHAT_API=true`。如果聊天服务未初始化，服务器返回 `503` 错误。
+</Note>
+
+## 端点
+
+```
+POST /product/chat/complete
+```
+
+## 请求体
+
+<ParamField body="user_id" type="string" required>
+  用户的唯一标识符。MemOS 使用它限定记忆检索和存储的范围。
+</ParamField>
+
+<ParamField body="query" type="string" required>
+  用户的消息或问题。
+</ParamField>
+
+<ParamField body="readable_cube_ids" type="string[]">
+  用于检索上下文的 MemCube ID 列表。省略时，MemOS 回退到用户的默认 cube。
+</ParamField>
+
+<ParamField body="writable_cube_ids" type="string[]">
+  用于存储新交互的 MemCube ID 列表。省略时，MemOS 回退到用户的默认 cube。
+</ParamField>
+
+<ParamField body="session_id" type="string">
+  可选的会话标识符。MemOS 将其用作软信号，以浮现与当前对话上下文更相关的记忆。不充当硬过滤器。
+</ParamField>
+
+<ParamField body="history" type="object[]">
+  要包含在 LLM 上下文窗口中的先前对话轮次。每项必须有 `role`（`"user"` 或 `"assistant"`）和 `content` 字符串。最多使用最后 20 轮。
+
+  <Expandable title="message object">
+    <ParamField body="history[].role" type="string" required>
+      说话者的角色。`"user"` 或 `"assistant"` 之一。
+    </ParamField>
+    <ParamField body="history[].content" type="string" required>
+      消息的文本内容。
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="mode" type="string" default="fast">
+  记忆检索模式。`"fast"` 运行单遍向量搜索。`"fine"` 运行更深入的多遍搜索以获得更高召回率，代价是延迟。`"mixture"` 结合两种策略。
+</ParamField>
+
+<ParamField body="top_k" type="integer" default="10">
+  检索并注入提示的最大文本记忆数。
+</ParamField>
+
+<ParamField body="relativity" type="number" default="0.45">
+  记忆被包含的最低相关性分数。仅返回 `relativity` 元数据值不低于此阈值的记忆。设置为 `0` 以禁用阈值过滤。
+</ParamField>
+
+<ParamField body="include_preference" type="boolean" default="true">
+  当为 `true` 时，MemOS 还检索偏好记忆并将其附加到系统提示。
+</ParamField>
+
+<ParamField body="pref_top_k" type="integer" default="6">
+  要检索的最大偏好记忆数。
+</ParamField>
+
+<ParamField body="system_prompt" type="string">
+  在记忆上下文之前预置的基础系统提示。省略时，MemOS 使用其内置的提示模板。
+</ParamField>
+
+<ParamField body="model_name_or_path" type="string">
+  用于此请求的 LLM 名称。必须匹配您的服务器配置中已注册的某个模型。省略时，使用服务器的默认模型。
+</ParamField>
+
+<ParamField body="max_tokens" type="integer">
+  响应中生成的最大 token 数。省略时，应用模型默认值。
+</ParamField>
+
+<ParamField body="temperature" type="number">
+  采样温度。较高的值产生更多样化的输出。省略时，应用模型默认值。
+</ParamField>
+
+<ParamField body="top_p" type="number">
+  核采样参数。省略时，应用模型默认值。
+</ParamField>
+
+<ParamField body="add_message_on_answer" type="boolean" default="true">
+  当为 `true` 时，MemOS 在 LLM 回复后异步存储查询和响应作为新记忆。设置为 `false` 以跳过写回步骤。
+</ParamField>
+
+<ParamField body="filter" type="object">
+  应用于记忆检索的结构化过滤器。支持带字段谓词的 `"and"` 和 `"or"` 条件。
+
+  <Expandable title="filter example">
+    ```json
+    {
+      "and": [
+        { "created_at": { "gt": "2024-01-01" } }
+      ]
+    }
+    ```
+  </Expandable>
+</ParamField>
+
+<ParamField body="internet_search" type="boolean" default="false">
+  当为 `true` 时，MemOS 使用实时互联网搜索来增强记忆检索，以用当前的 Web 结果补充已存储的记忆。
+</ParamField>
+
+## 响应
+
+<ResponseField name="code" type="number" required>
+  HTTP 风格的状态码。成功时为 `200`。
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  人类可读的状态消息，例如 `"Chat completed successfully"`。
+</ResponseField>
+
+<ResponseField name="data" type="object" required>
+  包含助手的回复。
+
+  <Expandable title="data object">
+    <ResponseField name="data.response" type="string" required>
+      助手答案的完整文本，已剥离任何 `<think>…</think>` 推理块。
+    </ResponseField>
+    <ResponseField name="data.reasoning" type="string | null">
+      从 `<think>…</think>` 标签中提取的思维链文本（如果模型产生了任何）。模型未输出推理块时为 `null`。
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## 示例
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/chat/complete \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "query": "What did I tell you about my dietary restrictions?",
+    "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "session_id": "session-abc-123"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/chat/complete",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "query": "What did I tell you about my dietary restrictions?",
+        "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "session_id": "session-abc-123",
+    },
+)
+data = response.json()
+print(data["data"]["response"])
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "message": "Chat completed successfully",
+  "data": {
+    "response": "You mentioned that you're allergic to nuts and prefer to avoid gluten when possible.",
+    "reasoning": null
+  }
+}
+```
+
+### 传入对话历史
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/chat/complete \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "query": "Can you recommend a recipe for tonight?",
+    "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "history": [
+      {
+        "role": "user",
+        "content": "I am vegetarian and I love Italian food."
+      },
+      {
+        "role": "assistant",
+        "content": "Great, I will keep that in mind!"
+      }
+    ]
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/chat/complete",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "query": "Can you recommend a recipe for tonight?",
+        "readable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "history": [
+            {"role": "user", "content": "I am vegetarian and I love Italian food."},
+            {"role": "assistant", "content": "Great, I will keep that in mind!"},
+        ],
+    },
+)
+print(response.json()["data"]["response"])
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "message": "Chat completed successfully",
+  "data": {
+    "response": "Based on your vegetarian preference and love of Italian food, here is a simple recipe for pasta al pomodoro tonight: cook spaghetti, toss with a sauce of crushed San Marzano tomatoes, garlic, olive oil, and fresh basil. Ready in under 20 minutes.",
+    "reasoning": null
+  }
+}
+```
+
+## 错误响应
+
+| Code | 描述 |
+|------|-------------|
+| `400` | 指定的 `model_name_or_path` 未在服务器配置中注册。 |
+| `422` | 验证错误 —— 一个或多个字段未通过类型或约束检查。响应体在 `detail` 数组中包含每个字段的消息。 |
+| `503` | 聊天服务不可用。请使用 `ENABLE_CHAT_API=true` 启动服务器。 |
+| `500` | 在记忆检索、LLM 生成或记忆写回期间发生内部错误。 |
+
+```json 503
+{
+  "detail": "Chat service is not available. Chat handler not initialized."
+}
+```
+
+```json 422
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["body", "user_id"],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```

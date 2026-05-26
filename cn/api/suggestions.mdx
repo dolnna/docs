@@ -1,0 +1,153 @@
+---
+title: '获取建议 —— POST /product/suggestions'
+description: '基于最近的对话上下文或已存储的记忆为用户生成建议的后续问题。适用于构建引导式聊天 UI。'
+---
+
+Suggestions 端点为用户生成推荐的后续问题。您可以提供最近的对话消息以获得上下文感知的建议，或省略它们以根据用户的已存储记忆生成问题。使用此端点在您的聊天 UI 中构建"建议问题"面板，帮助用户发现可以与他们的 AI Agent 探讨的相关话题。
+
+## 端点
+
+```
+POST /product/suggestions
+```
+
+## 请求体
+
+<ParamField body="user_id" type="string" required>
+  用户的唯一标识符。MemOS 在生成建议时使用它检索用户的已存储记忆。
+</ParamField>
+
+<ParamField body="mem_cube_id" type="string" required>
+  生成建议时要读取记忆的 MemCube ID。
+</ParamField>
+
+<ParamField body="language" type="string" default="zh">
+  生成建议的语言。`"en"` 表示英文，`"zh"` 表示中文。默认为 `"zh"`。
+</ParamField>
+
+<ParamField body="message" type="object[]">
+  可选的最近对话消息。提供时，MemOS 使用对话上下文生成与当前对话相关的后续问题。每条消息需要一个 `role`（`"user"` 或 `"assistant"`）和 `content` 字符串。
+</ParamField>
+
+## 响应
+
+<ResponseField name="code" type="number" required>
+  HTTP 风格的状态码。成功时为 `200`。
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  人类可读的状态消息。
+</ResponseField>
+
+<ResponseField name="data" type="string[]" required>
+  建议的后续问题列表，通常为 3 条。
+</ResponseField>
+
+## 示例
+
+### 来自对话上下文的建议
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/suggestions \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+    "language": "en",
+    "message": [
+      {
+        "role": "user",
+        "content": "What sushi restaurants do you recommend for my Tokyo trip?"
+      },
+      {
+        "role": "assistant",
+        "content": "Based on your preference for omakase-style dining, I recommend Sukiyabashi Jiro."
+      }
+    ]
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/suggestions",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+        "language": "en",
+        "message": [
+            {
+                "role": "user",
+                "content": "What sushi restaurants do you recommend for my Tokyo trip?",
+            },
+            {
+                "role": "assistant",
+                "content": "Based on your preference for omakase-style dining, I recommend Sukiyabashi Jiro.",
+            },
+        ],
+    },
+)
+suggestions = response.json()["data"]
+for s in suggestions:
+    print("-", s)
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Suggestions generated successfully",
+  "data": [
+    "What are the best neighborhoods in Tokyo for food?",
+    "Do you have any dietary restrictions I should know about?",
+    "Would you like recommendations for other cuisine types in Tokyo?"
+  ]
+}
+```
+
+### 来自记忆的建议（无对话上下文）
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/suggestions \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+    "language": "en"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/suggestions",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+        "language": "en",
+    },
+)
+print(response.json()["data"])
+```
+
+</CodeGroup>
+
+未提供 `message` 时，MemOS 从用户最近的记忆中推断建议，这使得它适合用于对话开始时的提示。
+
+## 错误响应
+
+| Code | 描述 |
+|------|-------------|
+| `422` | 验证错误 —— 缺少必需字段或 `language` 值无效。 |
+| `500` | 建议生成期间发生内部错误。 |

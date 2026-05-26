@@ -1,0 +1,293 @@
+---
+title: '提交反馈 —— POST /product/feedback'
+description: '通过提交自然语言反馈来纠正或改进已存储的记忆。MemOS 会自动找到冲突的记忆并更新它们。'
+---
+
+Feedback 端点让您可以用普通语言纠正不准确或过时的记忆。无需手动定位和编辑记忆记录，您只需用自然语言描述更正，MemOS 处理其余部分：它识别哪些已存储的记忆与您的反馈冲突，解决不一致，并相应地更新 MemCube。这是处理用户告知助手其记错某事的情况的推荐方式。
+
+## 端点
+
+```
+POST /product/feedback
+```
+
+## 请求体
+
+<ParamField body="user_id" type="string" required>
+  您正在纠正其记忆的用户的唯一标识符。
+</ParamField>
+
+<ParamField body="writable_cube_ids" type="string[]">
+  要更新的 MemCube ID 列表。您必须对列出的每个 cube 拥有写入权限。
+</ParamField>
+
+<ParamField body="feedback_content" type="string" required>
+  更正的自然语言描述，例如 `"The meeting location is Shanghai, not Beijing"`。MemOS 使用此文本查找冲突的记忆并决定要更新什么。
+</ParamField>
+
+<ParamField body="history" type="object[]">
+  为反馈提供上下文的最近对话历史。包含导致错误响应的消息有助于 MemOS 更准确地识别相关记忆。
+
+  <Expandable title="message object">
+    <ParamField body="history[].role" type="string" required>
+      说话者的角色：`"user"` 或 `"assistant"`。
+    </ParamField>
+    <ParamField body="history[].content" type="string" required>
+      消息的文本内容。
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="retrieved_memory_ids" type="string[]">
+  在产生错误响应的对话轮次中被召回的记忆 ID。提供时，MemOS 使用此列表作为起点来查找需要更新的记忆，这提高了准确性并减少了处理时间。
+</ParamField>
+
+<ParamField body="async_mode" type="string" default="async">
+  处理模式。`"sync"` 阻塞直到更正应用完毕。`"async"` 将操作入队并返回 `task_id`。
+</ParamField>
+
+<ParamField body="session_id" type="string" default="default_session">
+  用于将更正限定到当前对话上下文的会话标识符。
+</ParamField>
+
+<ParamField body="corrected_answer" type="boolean" default="false">
+  当为 `true` 时，响应包含应用反馈后生成的更正答案。当您想立即确认更新生效时很有用。
+</ParamField>
+
+<ParamField body="info" type="object">
+  附加到更正记录的额外元数据。
+
+  <Expandable title="info object">
+    <ParamField body="info.agent_id" type="string">
+      提交反馈的 Agent 标识符。
+    </ParamField>
+    <ParamField body="info.source_type" type="string">
+      更正的来源，例如 `"user_correction"`。
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## 响应
+
+<ResponseField name="code" type="number" required>
+  成功时为 `200`。
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  人类可读的状态消息。
+</ResponseField>
+
+<ResponseField name="data" type="object | null">
+  当 `async_mode` 为 `"async"` 时存在。当 `async_mode` 为 `"sync"` 时为 `null`。
+
+  <Expandable title="data object (async_mode: async)">
+    <ResponseField name="data.success" type="boolean">
+      反馈任务是否成功入队。
+    </ResponseField>
+    <ResponseField name="data.task_id" type="string">
+      后台任务的唯一标识符。轮询 `GET /product/scheduler/status?user_id=<user_id>&task_id=<task_id>` 以检查完成状态。
+    </ResponseField>
+    <ResponseField name="data.status" type="string">
+      初始任务状态，通常为 `"waiting"`。
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## 示例
+
+### 更正会议地点
+
+用户告诉助手他们的会议在北京，但后来更正为上海。
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/feedback \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "feedback_content": "The meeting location is Shanghai, not Beijing",
+    "history": [
+      {
+        "role": "user",
+        "content": "Where is my meeting next Friday?"
+      },
+      {
+        "role": "assistant",
+        "content": "Your meeting next Friday is in Beijing."
+      },
+      {
+        "role": "user",
+        "content": "That is wrong. The meeting is in Shanghai."
+      }
+    ],
+    "async_mode": "sync"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:8000/product/feedback",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "feedback_content": "The meeting location is Shanghai, not Beijing",
+        "history": [
+            {
+                "role": "user",
+                "content": "Where is my meeting next Friday?",
+            },
+            {
+                "role": "assistant",
+                "content": "Your meeting next Friday is in Beijing.",
+            },
+            {
+                "role": "user",
+                "content": "That is wrong. The meeting is in Shanghai.",
+            },
+        ],
+        "async_mode": "sync",
+    },
+)
+print(response.json())
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Feedback processed successfully",
+  "data": null
+}
+```
+
+### 带任务轮询的异步反馈
+
+<CodeGroup>
+
+```bash cURL
+curl --request POST \
+  --url http://localhost:8000/product/feedback \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+    "feedback_content": "I prefer tea, not coffee",
+    "history": [
+      {
+        "role": "user",
+        "content": "What do I like to drink?"
+      },
+      {
+        "role": "assistant",
+        "content": "You enjoy coffee."
+      },
+      {
+        "role": "user",
+        "content": "No, I prefer tea."
+      }
+    ],
+    "async_mode": "async"
+  }'
+```
+
+```python Python
+import requests
+import time
+
+# Submit feedback asynchronously
+feedback_resp = requests.post(
+    "http://localhost:8000/product/feedback",
+    json={
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "writable_cube_ids": ["b32d0977-435d-4828-a86f-4f47f8b55bca"],
+        "feedback_content": "I prefer tea, not coffee",
+        "history": [
+            {"role": "user", "content": "What do I like to drink?"},
+            {"role": "assistant", "content": "You enjoy coffee."},
+            {"role": "user", "content": "No, I prefer tea."},
+        ],
+        "async_mode": "async",
+    },
+)
+task_id = feedback_resp.json()["data"]["task_id"]
+
+# Poll until complete
+while True:
+    status_resp = requests.get(
+        "http://localhost:8000/product/scheduler/status",
+        params={
+            "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+            "task_id": task_id,
+        },
+    )
+    status = status_resp.json()["data"][0]["status"]
+    print(f"Task status: {status}")
+    if status in ("completed", "failed", "cancelled"):
+        break
+    time.sleep(1)
+```
+
+</CodeGroup>
+
+**响应**
+
+```json 200
+{
+  "code": 200,
+  "message": "Feedback processed successfully",
+  "data": {
+    "success": true,
+    "task_id": "f7e6d5c4-3b2a-1908-7654-321098fedcba",
+    "status": "waiting"
+  }
+}
+```
+
+## 反馈处理的工作原理
+
+当您提交反馈时，MemOS 运行以下步骤：
+
+<Steps>
+  <Step title="冲突检测">
+    MemOS 使用您提供的 `feedback_content` 和 `history` 在用户的 MemCube 中进行语义搜索，查找与反馈内容相矛盾的记忆。
+  </Step>
+  <Step title="解决">
+    冲突的记忆被更新或停用。一条反映更正的新记忆以高置信度分数创建。
+  </Step>
+  <Step title="版本跟踪">
+    原始记忆保留在版本历史中。如果 `corrected_answer` 为 `true`，更新后的响应将包含在回复中。
+  </Step>
+</Steps>
+
+<Tip>
+  为获得最佳结果，请在 `history` 字段中包含产生错误响应的完整对话轮次。MemOS 获得的上下文越多，就越能精确地识别要更新的记忆。
+</Tip>
+
+## 错误响应
+
+| Code | 描述 |
+|------|-------------|
+| `400` | 请求体格式错误。 |
+| `422` | 验证错误 —— 缺少必需字段或参数值无效。 |
+| `500` | 反馈处理期间发生内部错误。 |
+
+```json 422
+{
+  "detail": [
+    {
+      "type": "missing",
+      "loc": ["body", "feedback_content"],
+      "msg": "Field required",
+      "input": {}
+    }
+  ]
+}
+```
